@@ -96,13 +96,13 @@ def test_sidecar_absent_and_ambiguous_are_safe(
         {
             "a.jpg": b"a",
             "a.jpg.json": b"{}",
-            "a.jpg.extra.json": b"{}",
+            "a.jpg.extra.json": b'{"different": true}',
             "b.jpg": b"b",
         },
     )
     summary = import_takeout([archive], load(root), db)
     assert summary.imported == 2
-    assert any("Ambiguous" in warning for warning in summary.warnings)
+    assert any("ambigu" in warning for warning in summary.warnings)
 
 
 def test_zip_slip_is_rejected(tmp_path: Path) -> None:
@@ -563,3 +563,65 @@ def test_takeout_import_keeps_at_most_one_archive_open(
     assert summary.imported == 3
     assert active == 0
     assert maximum == 1
+
+
+def test_sidecar_in_another_volume_is_associated_during_import(
+    library: tuple[Path, Database], tmp_path: Path
+) -> None:
+    root, db = library
+    sidecars = tmp_path / "takeout-001.zip"
+    media = tmp_path / "takeout-002.zip"
+    member = "Takeout/Google Photos/Photos de 2024/cross-volume.jpg"
+    make_zip(
+        sidecars,
+        {
+            f"{member}.supplemental-metadata.json": json.dumps(
+                {"photoTakenTime": {"timestamp": "1704067200"}}
+            ).encode()
+        },
+    )
+    make_zip(media, {member: b"cross-volume-photo"})
+
+    summary = import_takeout([sidecars, media], load(root), db)
+
+    assert summary.imported == 1
+    assert len(summary.warnings) == 0
+    row = db.rows()[0]
+    assert row["capture_time"].startswith("2024-01-01")
+    assert row["metadata_provenance"] == "takeout-sidecar"
+    assert row["sidecar_path"] is not None
+    assert row["local_path"].startswith("media/2024/01/")
+
+
+def test_reconcile_links_cross_volume_sidecar_and_moves_existing_media(
+    library: tuple[Path, Database], tmp_path: Path
+) -> None:
+    root, db = library
+    member = "Takeout/Google Photos/Photos de 2024/reconcile.jpg"
+    media = tmp_path / "takeout-media.zip"
+    sidecars = tmp_path / "takeout-sidecars.zip"
+    make_zip(media, {member: b"reconcile-photo"})
+    import_takeout([media], load(root), db)
+    original_path = root / str(db.rows()[0]["local_path"])
+    assert "media/1970/01/" in str(original_path)
+
+    make_zip(
+        sidecars,
+        {
+            f"{member}.supplemental-metadata.json": json.dumps(
+                {"photoTakenTime": {"timestamp": "1704067200"}}
+            ).encode()
+        },
+    )
+    summary = takeout_module.reconcile_takeout([sidecars, media], load(root), db)
+
+    assert summary.metadata_matched == 1
+    assert summary.database_matched == 1
+    assert summary.metadata_updated == 1
+    assert summary.files_moved == 1
+    row = db.rows()[0]
+    corrected_path = root / str(row["local_path"])
+    assert corrected_path.is_file()
+    assert corrected_path.read_bytes() == b"reconcile-photo"
+    assert "media/2024/01/" in str(corrected_path)
+    assert not original_path.exists()

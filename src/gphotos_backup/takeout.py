@@ -12,6 +12,7 @@ import zipfile
 import zlib
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
+from dataclasses import dataclass
 from datetime import datetime
 from glob import glob, has_magic
 from pathlib import Path
@@ -22,6 +23,7 @@ from .models import (
     ArchiveCheckResult,
     ImportBreakdown,
     LibraryConfig,
+    ReconcileSummary,
     Summary,
     TakeoutCheckSummary,
 )
@@ -29,6 +31,12 @@ from .util import CHUNK, destination, parse_time, safe_archive_name, sanitize, s
 
 SIDECAR_SUFFIX = ".json"
 ProgressCallback = Callable[[int, int, str], None]
+
+
+@dataclass(frozen=True)
+class MetadataRecord:
+    metadata: dict[str, Any]
+    sidecar_path: str
 
 
 class CorruptArchiveError(ValueError):
@@ -281,6 +289,90 @@ def _capture(metadata: dict[str, Any]) -> datetime | None:
     )
 
 
+def _sidecar_media_key(name: str, media_names: set[str]) -> str | None:
+    raw = str(safe_archive_name(name))
+    lowered = raw.lower()
+    marker = ".supplemental-metadata"
+    marker_index = lowered.rfind(marker)
+    if marker_index >= 0 and lowered.endswith(".json"):
+        candidate = raw[:marker_index]
+        if candidate in media_names:
+            return candidate
+    if lowered.endswith(".json"):
+        candidate = raw[:-5]
+        if candidate in media_names:
+            return candidate
+
+    sidecar = Path(raw)
+    candidates = [
+        media
+        for media in media_names
+        if Path(media).parent == sidecar.parent
+        and (Path(media).stem == sidecar.stem or sidecar.name[:-5].startswith(Path(media).name))
+    ]
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _build_metadata_catalog(
+    prepared: list[tuple[int, Path, set[str]]],
+    config: LibraryConfig,
+) -> tuple[dict[str, MetadataRecord], int, int]:
+    media_names = {
+        name for _index, _path, names in prepared for name in names if not _is_sidecar(name)
+    }
+    references: dict[tuple[Path, str], str] = {}
+    orphan_count = 0
+    for _index, input_path, names in prepared:
+        for name in names:
+            if not _is_sidecar(name):
+                continue
+            key = _sidecar_media_key(name, media_names)
+            if key is None:
+                orphan_count += 1
+            else:
+                references[(input_path, name)] = key
+
+    preserved_by_key: dict[str, list[str]] = {}
+    for _index, input_path, names in prepared:
+        source = open_source(input_path)
+        try:
+            for name in names:
+                if not _is_sidecar(name):
+                    continue
+                key = references.get((input_path, name))
+                label = (
+                    f"media-key__{hashlib.sha256(key.encode()).hexdigest()[:16]}"
+                    if key is not None
+                    else "orphan"
+                )
+                sidecar_path = _preserve_sidecar(source, name, config, label)
+                if key is not None:
+                    preserved_by_key.setdefault(key, []).append(sidecar_path)
+        finally:
+            source.close()
+
+    catalog: dict[str, MetadataRecord] = {}
+    ambiguous = 0
+    for key, preserved in preserved_by_key.items():
+        unique_by_digest: dict[str, str] = {}
+        for sidecar_path in dict.fromkeys(preserved):
+            digest, _size = sha256_file(config.library_root / sidecar_path)
+            unique_by_digest.setdefault(digest, sidecar_path)
+        if len(unique_by_digest) != 1:
+            ambiguous += 1
+            continue
+        sidecar_path = next(iter(unique_by_digest.values()))
+        try:
+            value = json.loads((config.library_root / sidecar_path).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            ambiguous += 1
+            continue
+        if isinstance(value, dict):
+            catalog[key] = MetadataRecord(metadata=value, sidecar_path=sidecar_path)
+
+    return catalog, orphan_count, ambiguous
+
+
 def _preserve_sidecar(source: Source, name: str, config: LibraryConfig, label: str) -> str:
     temp_path: Path | None = None
     try:
@@ -396,6 +488,22 @@ def _import_takeout_locked(
                 finally:
                     source.close()
 
+            metadata_catalog: dict[str, MetadataRecord] = {}
+            if config.preserve_sidecars and not dry_run:
+                metadata_catalog, orphan_count, ambiguous_count = _build_metadata_catalog(
+                    prepared, config
+                )
+                if orphan_count:
+                    summary.warnings.append(
+                        f"{orphan_count} sidecar(s) JSON sans média correspondant ont été "
+                        "conservés dans metadata/."
+                    )
+                if ambiguous_count:
+                    summary.warnings.append(
+                        f"{ambiguous_count} association(s) de sidecar restent ambiguës ; "
+                        "les JSON concernés ont été conservés."
+                    )
+
             completed_bytes = 0
             if progress:
                 progress(0, total_media_bytes, "Analyse terminée")
@@ -403,7 +511,6 @@ def _import_takeout_locked(
             for archive_index, input_path, names in prepared:
                 source = open_source(input_path)
                 stack.callback(source.close)
-                used_sidecars: set[str] = set()
                 for name in sorted(names):
                     if _is_sidecar(name):
                         continue
@@ -426,10 +533,9 @@ def _import_takeout_locked(
                             progress(completed_bytes, total_media_bytes, label)
                         continue
 
-                    metadata, sidecar, warnings = _metadata(source, name)
-                    summary.warnings.extend(warnings)
-                    if sidecar:
-                        used_sidecars.add(sidecar)
+                    record = metadata_catalog.get(str(safe_archive_name(name)))
+                    metadata = record.metadata if record else {}
+                    sidecar_path = record.sidecar_path if record else None
                     capture = _capture(metadata)
 
                     def advance(block_size: int, current_label: str = label) -> None:
@@ -441,8 +547,6 @@ def _import_takeout_locked(
                     temp_path, digest, size = _copy_media_to_temp(source, name, config, advance)
                     try:
                         if db.by_hash(digest):
-                            if sidecar and config.preserve_sidecars and not dry_run:
-                                _preserve_sidecar(source, sidecar, config, f"media__{digest[:16]}")
                             summary.already_local += 1
                             _record_breakdown(summary, archive_key, media_type, "already_local")
                             continue
@@ -458,11 +562,6 @@ def _import_takeout_locked(
                                 bytes_written=size,
                             )
                             continue
-                        sidecar_path: str | None = None
-                        if sidecar and config.preserve_sidecars:
-                            sidecar_path = _preserve_sidecar(
-                                source, sidecar, config, f"media__{digest[:16]}"
-                            )
                         target.parent.mkdir(parents=True, exist_ok=True)
                         os.replace(temp_path, target)
                         if (apply_file_times or config.apply_file_times) and capture:
@@ -479,7 +578,7 @@ def _import_takeout_locked(
                                 "capture_time": capture.isoformat() if capture else None,
                                 "download_status": "complete",
                                 "metadata_provenance": (
-                                    "takeout-sidecar" if sidecar else "filesystem"
+                                    "takeout-sidecar" if record else "filesystem"
                                 ),
                                 "sidecar_path": sidecar_path,
                             }
@@ -496,15 +595,6 @@ def _import_takeout_locked(
                     finally:
                         temp_path.unlink(missing_ok=True)
 
-                if config.preserve_sidecars and not dry_run:
-                    orphans = sorted(
-                        name for name in names if _is_sidecar(name) and name not in used_sidecars
-                    )
-                    for orphan in orphans:
-                        _preserve_sidecar(source, orphan, config, "orphan")
-                        summary.warnings.append(
-                            f"Preserved JSON without an unambiguous media match: {orphan}"
-                        )
                 source.close()
         db.finish_run(run_id, summary.model_dump(), "success")
     except BaseException as error:
@@ -586,6 +676,129 @@ def _record_breakdown(
         breakdown = collection.setdefault(key, ImportBreakdown())
         setattr(breakdown, field, getattr(breakdown, field) + 1)
         breakdown.bytes_written += bytes_written
+
+
+def reconcile_takeout(
+    inputs: list[Path],
+    config: LibraryConfig,
+    db: Database,
+    *,
+    progress: ProgressCallback | None = None,
+) -> ReconcileSummary:
+    with _import_lock(config.library_root):
+        return _reconcile_takeout_locked(inputs, config, db, progress=progress)
+
+
+def _reconcile_takeout_locked(
+    inputs: list[Path],
+    config: LibraryConfig,
+    db: Database,
+    *,
+    progress: ProgressCallback | None,
+) -> ReconcileSummary:
+    summary = ReconcileSummary()
+    run_id = db.begin_run("takeout reconcile")
+    try:
+        prepared: list[tuple[int, Path, set[str]]] = []
+        total_bytes = 0
+        expanded = _expand_inputs(inputs)
+        for archive_index, input_path in enumerate(expanded, start=1):
+            source = open_source(input_path)
+            try:
+                names = set(source.names())
+                prepared.append((archive_index, input_path, names))
+                total_bytes += sum(source.size(name) for name in names if not _is_sidecar(name))
+            finally:
+                source.close()
+
+        catalog, summary.orphan_sidecars, summary.ambiguous_sidecars = _build_metadata_catalog(
+            prepared, config
+        )
+        summary.sidecars_catalogued = len(catalog)
+        completed = 0
+        if progress:
+            progress(0, total_bytes, "Catalogue global des métadonnées construit")
+
+        for archive_index, input_path, names in prepared:
+            source = open_source(input_path)
+            try:
+                for name in sorted(names):
+                    if _is_sidecar(name):
+                        continue
+                    summary.media_scanned += 1
+                    member_size = source.size(name)
+                    record = catalog.get(str(safe_archive_name(name)))
+                    label = (
+                        f"[{archive_index}/{len(expanded)}] "
+                        f"{input_path.name[-24:]} · {Path(name).name[-32:]}"
+                    )
+                    if record is None:
+                        completed += member_size
+                        if progress:
+                            progress(completed, total_bytes, label)
+                        continue
+                    summary.metadata_matched += 1
+                    digest_builder = hashlib.sha256()
+                    with source.open(name) as stream:
+                        while block := stream.read(CHUNK):
+                            digest_builder.update(block)
+                            block_size = len(block)
+                            completed += block_size
+                            summary.bytes_read += block_size
+                            if progress:
+                                progress(completed, total_bytes, label)
+                    row = db.by_hash(digest_builder.hexdigest())
+                    if row is None:
+                        summary.missing_from_library += 1
+                        continue
+                    summary.database_matched += 1
+                    capture = _capture(record.metadata)
+                    current = config.library_root / str(row["local_path"])
+                    target = current
+                    if capture is not None and current.is_file():
+                        target = _reconcile_destination(
+                            config.library_root,
+                            Path(name).name,
+                            capture,
+                            digest_builder.hexdigest(),
+                            current,
+                        )
+                        if target != current:
+                            target.parent.mkdir(parents=True, exist_ok=True)
+                            os.replace(current, target)
+                            summary.files_moved += 1
+                    elif not current.is_file():
+                        summary.warnings.append(f"Fichier local introuvable : {current}")
+                    db.update_media_metadata(
+                        str(row["id"]),
+                        capture_time=capture.isoformat() if capture else None,
+                        sidecar_path=record.sidecar_path,
+                        local_path=str(target.relative_to(config.library_root)),
+                    )
+                    summary.metadata_updated += 1
+            finally:
+                source.close()
+        db.finish_run(run_id, summary.model_dump(), "success")
+    except BaseException as error:
+        result = "interrupted" if isinstance(error, KeyboardInterrupt) else "failed"
+        db.finish_run(run_id, summary.model_dump(), result, [str(error)])
+        raise
+    return summary
+
+
+def _reconcile_destination(
+    root: Path,
+    original: str,
+    capture: datetime,
+    digest: str,
+    current: Path,
+) -> Path:
+    directory = root / "media" / f"{capture.year:04d}" / f"{capture.month:02d}"
+    prefix = capture.strftime("%Y-%m-%d_%H-%M-%S")
+    candidate = directory / f"{prefix}__{sanitize(original)}"
+    if candidate.exists() and candidate != current:
+        candidate = directory / f"{prefix}__{digest[:10]}__{sanitize(original)}"
+    return candidate
 
 
 def check_takeout(

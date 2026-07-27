@@ -69,6 +69,20 @@ class TakeoutCheckSummary(BaseModel):
     results: list[ArchiveCheckResult] = Field(default_factory=list)
 
 
+class ReconcileSummary(BaseModel):
+    media_scanned: int = 0
+    metadata_matched: int = 0
+    database_matched: int = 0
+    metadata_updated: int = 0
+    files_moved: int = 0
+    missing_from_library: int = 0
+    sidecars_catalogued: int = 0
+    orphan_sidecars: int = 0
+    ambiguous_sidecars: int = 0
+    bytes_read: int = 0
+    warnings: list[str] = Field(default_factory=list)
+
+
 class PickedMedia(BaseModel):
     provider_id: str
     filename: str

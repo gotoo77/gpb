@@ -13,6 +13,20 @@ completed content from being copied again.
 An interruption reports exit code 130 and a resume instruction. A disk error, including `ENOSPC`,
 finishes the run as failed with its detailed message without recording the incomplete media.
 
+## Reconcile metadata across volumes
+
+Google Takeout may place a photo in one volume and its `supplemental-metadata.json` file in another.
+To repair a library imported before this situation was supported:
+
+```console
+uv run gpb takeout reconcile ~/Downloads/takeout-*.zip
+uv run gpb verify
+```
+
+The command reads media to recover their SHA-256, links preserved sidecars, corrects dates in
+SQLite, and atomically moves misplaced files, including files under `media/1970/01/`. It does not
+copy media content again. Keep the archives until both reconciliation and `verify` have completed.
+
 After a Picker interruption, rerun `picker download` while the session and URLs remain valid.
 Otherwise create a new session and select the items again. Provider IDs and hashes prevent
 duplicates.

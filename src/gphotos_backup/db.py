@@ -166,3 +166,20 @@ class Database:
             "counters": json.loads(row["counters_json"]),
             "errors": json.loads(row["errors_json"]),
         }
+
+    def update_media_metadata(
+        self,
+        media_id: str,
+        *,
+        capture_time: str | None,
+        sidecar_path: str,
+        local_path: str,
+    ) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """UPDATE media
+                   SET capture_time=?, metadata_provenance='takeout-sidecar',
+                       sidecar_path=?, local_path=?
+                   WHERE id=?""",
+                (capture_time, sidecar_path, local_path, media_id),
+            )

@@ -26,13 +26,14 @@ from . import __version__
 from . import auth as oauth
 from .config import discover, load, write_config
 from .db import Database
-from .models import Summary, TakeoutCheckSummary
+from .models import ReconcileSummary, Summary, TakeoutCheckSummary
 from .takeout import (
     CorruptArchiveError,
     check_takeout,
     find_partials,
     import_is_running,
     import_takeout,
+    reconcile_takeout,
 )
 from .util import sha256_file
 
@@ -82,6 +83,18 @@ def _emit(value: Any, as_json: bool = False) -> None:
             typer.echo("\nFichiers partiels abandonnés :", err=True)
             for partial in value.abandoned_partials:
                 typer.echo(f"- {partial}", err=True)
+        for warning in value.warnings:
+            typer.echo(f"WARNING: {warning}", err=True)
+    elif isinstance(value, ReconcileSummary):
+        typer.echo(f"Médias analysés       : {value.media_scanned:,}")
+        typer.echo(f"Métadonnées associées : {value.metadata_matched:,}")
+        typer.echo(f"Médias locaux trouvés : {value.database_matched:,}")
+        typer.echo(f"Fiches mises à jour   : {value.metadata_updated:,}")
+        typer.echo(f"Fichiers déplacés     : {value.files_moved:,}")
+        typer.echo(f"Sidecars catalogués   : {value.sidecars_catalogued:,}")
+        typer.echo(f"Sidecars orphelins    : {value.orphan_sidecars:,}")
+        typer.echo(f"Associations ambiguës : {value.ambiguous_sidecars:,}")
+        typer.echo(f"Octets lus            : {value.bytes_read:,}")
         for warning in value.warnings:
             typer.echo(f"WARNING: {warning}", err=True)
     elif isinstance(value, dict):
@@ -349,6 +362,64 @@ def takeout_check(
         _emit_check_summary(summary)
     if summary.corrupt:
         raise typer.Exit(1)
+
+
+@takeout_app.command("reconcile")
+def takeout_reconcile(
+    paths: Annotated[list[Path], typer.Argument(help="Archives Takeout à réconcilier.")],
+    library: Annotated[Path | None, typer.Option("--library")] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+    show_progress: Annotated[
+        bool, typer.Option("--progress/--no-progress", help="Afficher la progression en octets.")
+    ] = True,
+) -> None:
+    """Rattacher les sidecars entre volumes et corriger la bibliothèque."""
+    try:
+        config = load(library)
+        db = Database(config.library_root)
+        progress_ui = Progress(
+            SpinnerColumn(),
+            TextColumn("{task.description}", markup=False),
+            BarColumn(),
+            TaskProgressColumn(),
+            DownloadColumn(),
+            TransferSpeedColumn(),
+            TimeRemainingColumn(),
+            console=Console(stderr=True),
+            disable=json_output or not show_progress,
+        )
+        with progress_ui:
+            task = progress_ui.add_task("Catalogue des métadonnées…", total=None)
+
+            def update_progress(completed: int, total: int, label: str) -> None:
+                progress_ui.update(
+                    task,
+                    completed=completed,
+                    total=total,
+                    description=label[-70:],
+                )
+
+            summary = reconcile_takeout(paths, config, db, progress=update_progress)
+            progress_ui.update(task, description="Réconciliation terminée")
+    except KeyboardInterrupt:
+        typer.echo(
+            "\nINTERRUPTION: réconciliation interrompue proprement ; relancez la même commande.",
+            err=True,
+        )
+        raise typer.Exit(130) from None
+    except (OSError, ValueError) as error:
+        if json_output:
+            _emit(
+                {
+                    "status": "error",
+                    "error": {"type": type(error).__name__, "message": str(error)},
+                },
+                True,
+            )
+        else:
+            typer.echo(f"ERROR: {error}", err=True)
+        raise typer.Exit(2) from None
+    _emit(summary, json_output)
 
 
 def _emit_check_summary(summary: TakeoutCheckSummary) -> None:

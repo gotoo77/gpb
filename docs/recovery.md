@@ -15,6 +15,21 @@ Une interruption affiche le code retour 130 et une instruction de reprise. Une e
 notamment `ENOSPC`, termine le run en échec avec son message détaillé sans enregistrer le média
 incomplet.
 
+## Réconcilier les métadonnées entre volumes
+
+Google Takeout peut placer une photo dans un volume et son fichier `supplemental-metadata.json`
+dans un autre. Pour réparer une bibliothèque importée avant la prise en charge de cette situation :
+
+```console
+uv run gpb takeout reconcile ~/Téléchargements/takeout-*.zip
+uv run gpb verify
+```
+
+La commande lit les médias pour retrouver leur SHA-256, rattache les sidecars déjà préservés,
+corrige les dates dans SQLite et déplace atomiquement les fichiers mal classés, notamment ceux de
+`media/1970/01/`. Elle ne recopie pas le contenu des médias. Conservez les archives jusqu’à la fin
+de la réconciliation et de `verify`.
+
 Après une interruption Picker, relancez `picker download` tant que la session et les URL restent
 valides. Sinon, créez une nouvelle session et sélectionnez à nouveau les éléments. Les identifiants
 fournisseur et les hashes empêchent les doublons.

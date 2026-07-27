@@ -23,6 +23,7 @@ uv run gpb init --library ~/Photos/GooglePhotos
 export GPB_LIBRARY=~/Photos/GooglePhotos
 uv run gpb takeout check ~/Téléchargements/takeout-*.zip
 uv run gpb takeout import ~/Downloads/takeout-1.zip ~/Downloads/takeout-2.zip
+uv run gpb takeout reconcile ~/Téléchargements/takeout-*.zip
 uv run gpb verify
 uv run gpb status
 uv run gpb export-manifest
@@ -46,6 +47,11 @@ Le rapport final ventile les imports par archive et par type de média. `gpb sta
 fichiers `.partial` actifs des fichiers abandonnés et expose le résultat du dernier traitement. Un
 verrou empêche deux imports simultanés dans la même bibliothèque. Après `Ctrl+C` ou une erreur de
 disque plein, relancez la même commande : les médias déjà terminés ne sont pas recopiés.
+
+Google peut placer un média et son JSON `supplemental-metadata` dans des volumes différents. `gpb`
+construit donc un catalogue global avant l’import. Pour une bibliothèque créée avec une version
+antérieure, `takeout reconcile` rattache ces JSON, corrige les dates et déplace atomiquement les
+médias concernés sans les recopier.
 
 ## Sélection explicite avec Picker
 
