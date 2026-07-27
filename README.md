@@ -68,6 +68,13 @@ uv run gpb picker download
 L’exécutable long `gphotos-backup` reste disponible comme alias, mais `gpb` est la commande
 recommandée.
 
+## Convention de documentation
+
+Le français est la langue par défaut : les fichiers canoniques utilisent leur nom sans suffixe,
+comme `README.md` ou `docs/recovery.md`. Chaque document possède une traduction anglaise en
+`.en.md` et un sélecteur `[Français] | [English]` placé sous son titre. Les deux versions sont
+mises à jour ensemble.
+
 Consultez également les documents sur les [limitations](docs/limitations.md), la
 [récupération](docs/recovery.md), la [sécurité](docs/security.md) et la
 [roadmap](docs/roadmap.md).

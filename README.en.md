@@ -66,6 +66,12 @@ uv run gpb picker download
 The longer `gphotos-backup` executable remains available as an alias, but `gpb` is the recommended
 command.
 
+## Documentation convention
+
+French is the default language: canonical files use names without a language suffix, such as
+`README.md` or `docs/recovery.md`. Every document has an English `.en.md` translation and a
+`[Français] | [English]` switch immediately below its title. Both versions are updated together.
+
 See also the documentation covering [limitations](docs/limitations.en.md),
 [recovery](docs/recovery.en.md), [security](docs/security.en.md), and the
 [roadmap](docs/roadmap.en.md).
