@@ -31,8 +31,8 @@ The `takeout check` command decompresses every member and checks its CRC, contin
 damaged, then lists the exact archives that need to be downloaded again. Each result is saved
 immediately: subsequent runs automatically skip unchanged volumes and only check new or replaced
 files. `--force` requests a new full check. It does not require an
-initialized library. During checks, the progress bar displays the current volume number and name
-as well as the current file. It shows processed bytes, throughput, and estimated
+initialized library. During checks and imports, the progress bar displays the current volume
+number and name as well as the current file. It shows processed bytes, throughput, and estimated
 remaining time. Use `--no-progress` to disable it or `--json` for script-friendly output.
 
 Imports are idempotent through SHA-256 content hashes. Existing content is never deleted. Each

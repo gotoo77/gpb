@@ -379,9 +379,10 @@ def _import_takeout_locked(
     run_id = db.begin_run("takeout import")
     try:
         with ExitStack() as stack:
-            prepared: list[tuple[Path, Source, set[str]]] = []
+            prepared: list[tuple[int, Path, Source, set[str]]] = []
             total_media_bytes = 0
-            for input_path in _expand_inputs(inputs):
+            expanded_inputs = _expand_inputs(inputs)
+            for archive_index, input_path in enumerate(expanded_inputs, start=1):
                 source = open_source(input_path)
                 stack.callback(source.close)
                 names = set(source.names())
@@ -391,13 +392,13 @@ def _import_takeout_locked(
                 total_media_bytes += sum(
                     source.size(name) for name in names if not _is_sidecar(name)
                 )
-                prepared.append((input_path, source, names))
+                prepared.append((archive_index, input_path, source, names))
 
             completed_bytes = 0
             if progress:
                 progress(0, total_media_bytes, "Analyse terminée")
 
-            for input_path, source, names in prepared:
+            for archive_index, input_path, source, names in prepared:
                 used_sidecars: set[str] = set()
                 for name in sorted(names):
                     if _is_sidecar(name):
@@ -407,7 +408,11 @@ def _import_takeout_locked(
                     summary.scanned += 1
                     _record_breakdown(summary, archive_key, media_type, "scanned")
                     member_size = source.size(name)
-                    label = f"{input_path.name}: {Path(name).name}"
+                    archive_label = input_path.name[-24:]
+                    member_label = Path(name).name[-32:]
+                    label = (
+                        f"[{archive_index}/{len(expanded_inputs)}] {archive_label} · {member_label}"
+                    )
                     if member_size > config.max_member_bytes:
                         summary.failed += 1
                         _record_breakdown(summary, archive_key, media_type, "failed")

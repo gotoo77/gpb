@@ -32,8 +32,8 @@ La commande `takeout check` décompresse et contrôle le CRC de chaque entrée, 
 si un volume est défectueux, puis liste précisément les archives à retélécharger. Chaque résultat
 est mémorisé immédiatement : une relance ignore automatiquement les volumes inchangés et ne
 contrôle que les fichiers nouveaux ou remplacés. `--force` impose un nouveau contrôle complet.
-La commande ne nécessite pas de bibliothèque initialisée. Pendant le contrôle, la barre affiche
-le numéro et le nom du volume ainsi que le fichier courant. Elle indique aussi le débit et le temps
+La commande ne nécessite pas de bibliothèque initialisée. Pendant le contrôle et l’import, la barre
+affiche le numéro et le nom du volume ainsi que le fichier courant. Elle indique aussi le débit et le temps
 restant estimé. Utilisez `--no-progress` pour la désactiver ou `--json` pour une sortie exploitable
 par un script.
 
