@@ -1,0 +1,16 @@
+.venv/
+dist/
+build/
+*.egg-info/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.py[cod]
+credentials.json
+client_secret*.json
+token.json
+*.sqlite3
+*.partial
+.coverage
+
