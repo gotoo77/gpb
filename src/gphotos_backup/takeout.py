@@ -379,26 +379,30 @@ def _import_takeout_locked(
     run_id = db.begin_run("takeout import")
     try:
         with ExitStack() as stack:
-            prepared: list[tuple[int, Path, Source, set[str]]] = []
+            prepared: list[tuple[int, Path, set[str]]] = []
             total_media_bytes = 0
             expanded_inputs = _expand_inputs(inputs)
             for archive_index, input_path in enumerate(expanded_inputs, start=1):
                 source = open_source(input_path)
-                stack.callback(source.close)
-                names = set(source.names())
-                archive_bytes = sum(source.size(name) for name in names)
-                if archive_bytes > config.max_archive_bytes:
-                    raise ValueError(f"Archive expands beyond configured limit: {input_path}")
-                total_media_bytes += sum(
-                    source.size(name) for name in names if not _is_sidecar(name)
-                )
-                prepared.append((archive_index, input_path, source, names))
+                try:
+                    names = set(source.names())
+                    archive_bytes = sum(source.size(name) for name in names)
+                    if archive_bytes > config.max_archive_bytes:
+                        raise ValueError(f"Archive expands beyond configured limit: {input_path}")
+                    total_media_bytes += sum(
+                        source.size(name) for name in names if not _is_sidecar(name)
+                    )
+                    prepared.append((archive_index, input_path, names))
+                finally:
+                    source.close()
 
             completed_bytes = 0
             if progress:
                 progress(0, total_media_bytes, "Analyse terminée")
 
-            for archive_index, input_path, source, names in prepared:
+            for archive_index, input_path, names in prepared:
+                source = open_source(input_path)
+                stack.callback(source.close)
                 used_sidecars: set[str] = set()
                 for name in sorted(names):
                     if _is_sidecar(name):
@@ -501,6 +505,7 @@ def _import_takeout_locked(
                         summary.warnings.append(
                             f"Preserved JSON without an unambiguous media match: {orphan}"
                         )
+                source.close()
         db.finish_run(run_id, summary.model_dump(), "success")
     except BaseException as error:
         result = "interrupted" if isinstance(error, KeyboardInterrupt) else "failed"

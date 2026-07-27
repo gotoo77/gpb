@@ -524,3 +524,42 @@ def test_second_takeout_import_is_rejected_while_first_holds_lock(
     summary = import_takeout([archive], load(root), db, progress=try_second_import)
     assert checked
     assert summary.imported == 1
+
+
+def test_takeout_import_keeps_at_most_one_archive_open(
+    library: tuple[Path, Database],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, db = library
+    archives = [tmp_path / "one.zip", tmp_path / "two.zip", tmp_path / "three.zip"]
+    for index, archive in enumerate(archives):
+        make_zip(archive, {f"{index}.jpg": str(index).encode()})
+
+    real_open_source = takeout_module.open_source
+    active = 0
+    maximum = 0
+
+    def tracked_open(path: Path) -> takeout_module.Source:
+        nonlocal active, maximum
+        source = real_open_source(path)
+        original_close = source.close
+        closed = False
+        active += 1
+        maximum = max(maximum, active)
+
+        def tracked_close() -> None:
+            nonlocal active, closed
+            original_close()
+            if not closed:
+                active -= 1
+                closed = True
+
+        source.close = tracked_close  # type: ignore[method-assign]
+        return source
+
+    monkeypatch.setattr(takeout_module, "open_source", tracked_open)
+    summary = import_takeout(archives, load(root), db)
+    assert summary.imported == 3
+    assert active == 0
+    assert maximum == 1
