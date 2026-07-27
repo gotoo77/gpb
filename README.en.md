@@ -40,9 +40,10 @@ file is streamed to a `.partial` file and atomically renamed after hashing. Side
 under `metadata/`. Filesystem timestamps are changed only when the explicit `--apply-file-times`
 option is used.
 
-The completion report breaks imports down by archive and media type. `gpb status` reports
-abandoned `.partial` files and exposes the latest run result. After Ctrl+C or a full-disk error,
-rerun the same command: already completed media are not copied again.
+The completion report breaks imports down by archive and media type. `gpb status` distinguishes
+active `.partial` files from abandoned ones and exposes the latest run result. A lock prevents two
+simultaneous imports into the same library. After Ctrl+C or a full-disk error, rerun the same
+command: already completed media are not copied again.
 
 ## Explicit Picker selection
 

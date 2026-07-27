@@ -42,9 +42,10 @@ fichier est écrit progressivement dans un fichier `.partial`, puis renommé ato
 calcul de son hash. Les sidecars sont conservés dans `metadata/`. Les dates du système de fichiers
 ne sont modifiées qu’avec l’option explicite `--apply-file-times`.
 
-Le rapport final ventile les imports par archive et par type de média. `gpb status` signale les
-fichiers `.partial` abandonnés et expose le résultat du dernier traitement. Après `Ctrl+C` ou une
-erreur de disque plein, relancez la même commande : les médias déjà terminés ne sont pas recopiés.
+Le rapport final ventile les imports par archive et par type de média. `gpb status` distingue les
+fichiers `.partial` actifs des fichiers abandonnés et expose le résultat du dernier traitement. Un
+verrou empêche deux imports simultanés dans la même bibliothèque. Après `Ctrl+C` ou une erreur de
+disque plein, relancez la même commande : les médias déjà terminés ne sont pas recopiés.
 
 ## Sélection explicite avec Picker
 

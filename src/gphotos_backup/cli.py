@@ -27,7 +27,13 @@ from . import auth as oauth
 from .config import discover, load, write_config
 from .db import Database
 from .models import Summary, TakeoutCheckSummary
-from .takeout import CorruptArchiveError, check_takeout, find_partials, import_takeout
+from .takeout import (
+    CorruptArchiveError,
+    check_takeout,
+    find_partials,
+    import_is_running,
+    import_takeout,
+)
 from .util import sha256_file
 
 app = typer.Typer(help="Reliable local Google Photos archive.")
@@ -442,14 +448,32 @@ def status(
     library: Annotated[Path | None, typer.Option("--library")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    root = _root(library)
+    try:
+        root = _root(library)
+    except (FileNotFoundError, ValueError) as error:
+        if json_output:
+            _emit(
+                {
+                    "status": "error",
+                    "error": {"type": type(error).__name__, "message": str(error)},
+                },
+                True,
+            )
+        else:
+            typer.echo(f"ERROR: {error}", err=True)
+        raise typer.Exit(2) from None
     db = Database(root)
     payload: dict[str, object] = dict(db.counts())
     payload["library"] = str(root)
     partials = find_partials(root)
-    payload["abandoned_partials"] = len(partials)
+    last_run = db.latest_run()
+    legacy_running = last_run is not None and last_run["result"] == "running"
+    running = import_is_running(root) or legacy_running
+    payload["import_running"] = running
+    payload["active_partials"] = len(partials) if running else 0
+    payload["abandoned_partials"] = 0 if running else len(partials)
     payload["partial_paths"] = partials
-    payload["last_run"] = db.latest_run()
+    payload["last_run"] = last_run
     _emit(payload, json_output)
 
 
@@ -497,12 +521,17 @@ def doctor(
         usage = shutil.disk_usage(root)
         checks.append({"name": "disk-free", "status": "OK", "detail": str(usage.free)})
         partials = find_partials(root)
+        running = import_is_running(root)
         checks.append(
             {
-                "name": "abandoned-partials",
-                "status": "WARNING" if partials else "OK",
+                "name": "partial-files",
+                "status": "WARNING" if partials and not running else "OK",
                 "detail": (
-                    f"{len(partials)} fichier(s): {', '.join(partials)}" if partials else "none"
+                    f"{len(partials)} actif(s): {', '.join(partials)}"
+                    if partials and running
+                    else f"{len(partials)} abandonné(s): {', '.join(partials)}"
+                    if partials
+                    else "none"
                 ),
             }
         )

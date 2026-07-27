@@ -469,3 +469,58 @@ def test_abandoned_partial_is_reported_by_import_and_status(
     assert payload["abandoned_partials"] == 1
     assert payload["partial_paths"] == [str(partial)]
     assert payload["last_run"]["result"] == "success"
+
+
+def test_status_without_library_has_no_traceback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.delenv("GPB_LIBRARY", raising=False)
+    result = CliRunner().invoke(
+        app,
+        ["status"],
+        catch_exceptions=False,
+        env={"PWD": str(tmp_path)},
+    )
+    assert result.exit_code == 2
+    assert "No library configured" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_status_distinguishes_active_partial_from_abandoned(
+    library: tuple[Path, Database],
+) -> None:
+    root, db = library
+    partial = root / ".gphotos-backup" / "active.partial"
+    partial.write_bytes(b"in progress")
+    db.begin_run("takeout import")
+
+    result = CliRunner().invoke(
+        app,
+        ["status", "--library", str(root), "--json"],
+        catch_exceptions=False,
+    )
+    payload = json.loads(result.output)
+    assert payload["import_running"] is True
+    assert payload["active_partials"] == 1
+    assert payload["abandoned_partials"] == 0
+
+
+def test_second_takeout_import_is_rejected_while_first_holds_lock(
+    library: tuple[Path, Database], tmp_path: Path
+) -> None:
+    root, db = library
+    archive = tmp_path / "locked.zip"
+    make_zip(archive, {"photo.jpg": b"photo"})
+    checked = False
+
+    def try_second_import(_completed: int, _total: int, _label: str) -> None:
+        nonlocal checked
+        if checked:
+            return
+        checked = True
+        with pytest.raises(ValueError, match="déjà en cours"):
+            import_takeout([archive], load(root), db)
+
+    summary = import_takeout([archive], load(root), db, progress=try_second_import)
+    assert checked
+    assert summary.imported == 1

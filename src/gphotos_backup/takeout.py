@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import mimetypes
@@ -348,6 +349,26 @@ def import_takeout(
     apply_file_times: bool = False,
     progress: ProgressCallback | None = None,
 ) -> Summary:
+    with _import_lock(config.library_root):
+        return _import_takeout_locked(
+            inputs,
+            config,
+            db,
+            dry_run=dry_run,
+            apply_file_times=apply_file_times,
+            progress=progress,
+        )
+
+
+def _import_takeout_locked(
+    inputs: list[Path],
+    config: LibraryConfig,
+    db: Database,
+    *,
+    dry_run: bool,
+    apply_file_times: bool,
+    progress: ProgressCallback | None,
+) -> Summary:
     summary = Summary()
     summary.abandoned_partials = find_partials(config.library_root)
     if summary.abandoned_partials:
@@ -486,6 +507,43 @@ def import_takeout(
         db.finish_run(run_id, summary.model_dump(), result, [message])
         raise
     return summary
+
+
+@contextmanager
+def _import_lock(root: Path) -> Iterator[None]:
+    path = root / ".gphotos-backup" / "import.lock"
+    with path.open("a+", encoding="utf-8") as stream:
+        try:
+            fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise ValueError(
+                f"Un import est déjà en cours pour {root}. "
+                "Attendez sa fin ou interrompez-le avant de relancer."
+            ) from None
+        stream.seek(0)
+        stream.truncate()
+        stream.write(f"{os.getpid()}\n")
+        stream.flush()
+        try:
+            yield
+        finally:
+            fcntl.flock(stream, fcntl.LOCK_UN)
+
+
+def import_is_running(root: Path) -> bool:
+    path = root / ".gphotos-backup" / "import.lock"
+    if not path.exists():
+        return False
+    try:
+        with path.open("a+", encoding="utf-8") as stream:
+            try:
+                fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return True
+            fcntl.flock(stream, fcntl.LOCK_UN)
+    except OSError:
+        return False
+    return False
 
 
 def find_partials(root: Path) -> list[str]:

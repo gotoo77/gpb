@@ -4,10 +4,11 @@
 
 An interrupted Takeout import leaves at most one randomly named `.partial` file under
 `.gphotos-backup/`. Completed media are already atomically installed and recorded. `gpb` removes
-its temporary file when it catches the error or interruption. `gpb status` reports any older
-partial file and displays the latest run result and errors. Manually remove a stale partial only
-while no `gpb` process is running, then rerun the exact same import. SHA-256 prevents completed
-content from being copied again.
+its temporary file when it catches the error or interruption. `gpb status` distinguishes partial
+files belonging to an active import from abandoned files and displays the latest run result and
+errors. A lock prevents simultaneous imports into the same library. Manually remove a stale
+partial only while no `gpb` process is running, then rerun the exact same import. SHA-256 prevents
+completed content from being copied again.
 
 An interruption reports exit code 130 and a resume instruction. A disk error, including `ENOSPC`,
 finishes the run as failed with its detailed message without recording the incomplete media.

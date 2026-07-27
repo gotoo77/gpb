@@ -5,8 +5,9 @@
 Un import Takeout interrompu laisse au plus un fichier au nom aléatoire avec le suffixe `.partial`
 dans `.gphotos-backup/`. Les médias terminés sont déjà installés atomiquement et enregistrés.
 `gpb` supprime son fichier temporaire lorsqu’il intercepte l’erreur ou l’interruption. `gpb status`
-signale tout fichier partiel plus ancien et affiche le résultat et les erreurs du dernier
-traitement. Supprimez manuellement un fichier partiel obsolète uniquement lorsqu’aucun processus
+distingue les fichiers partiels d’un import actif des fichiers abandonnés et affiche le résultat
+et les erreurs du dernier traitement. Un verrou empêche deux imports simultanés dans la même
+bibliothèque. Supprimez manuellement un fichier partiel obsolète uniquement lorsqu’aucun processus
 `gpb` ne tourne, puis relancez exactement le même import. SHA-256 empêche de recopier les contenus
 terminés.
 
