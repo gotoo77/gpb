@@ -30,7 +30,8 @@ uv run gpb export-manifest
 
 After a Takeout command, `uv run gpb takeout verify` is also available as an alias for
 `uv run gpb verify`. Verification reports the current file, processed bytes, throughput, and
-remaining time; `--no-progress` disables this bar.
+remaining time; `--no-progress` disables this bar. A subsequent run reuses results for files whose
+size and modification time have not changed. `uv run gpb verify --force` forces a complete reread.
 
 The `takeout check` command decompresses every member and checks its CRC, continues when a volume is
 damaged, then lists the exact archives that need to be downloaded again. Each result is saved

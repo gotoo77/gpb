@@ -806,6 +806,47 @@ def test_takeout_verify_is_an_alias_for_top_level_verify(
     assert payload["failed"] == 0
 
 
+def test_verify_reuses_unchanged_files_and_force_reads_them_again(
+    library: tuple[Path, Database], tmp_path: Path
+) -> None:
+    root, db = library
+    archive = tmp_path / "verify-cache.zip"
+    make_zip(archive, {"photo.jpg": b"verified"})
+    import_takeout([archive], load(root), db)
+
+    first = CliRunner().invoke(
+        app, ["verify", "--library", str(root), "--json"], catch_exceptions=False
+    )
+    second = CliRunner().invoke(
+        app, ["verify", "--library", str(root), "--json"], catch_exceptions=False
+    )
+    forced = CliRunner().invoke(
+        app,
+        ["verify", "--library", str(root), "--json", "--force"],
+        catch_exceptions=False,
+    )
+    media_path = root / str(db.rows()[0]["local_path"])
+    stat = media_path.stat()
+    os.utime(media_path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
+    changed = CliRunner().invoke(
+        app, ["verify", "--library", str(root), "--json"], catch_exceptions=False
+    )
+
+    first_payload = json.loads(first.output)
+    second_payload = json.loads(second.output)
+    forced_payload = json.loads(forced.output)
+    changed_payload = json.loads(changed.output)
+    assert first_payload["bytes_checked"] == len(b"verified")
+    assert first_payload["cached"] == 0
+    assert second_payload["bytes_checked"] == 0
+    assert second_payload["bytes_reused"] == len(b"verified")
+    assert second_payload["cached"] == 1
+    assert forced_payload["bytes_checked"] == len(b"verified")
+    assert forced_payload["cached"] == 0
+    assert changed_payload["bytes_checked"] == len(b"verified")
+    assert changed_payload["cached"] == 0
+
+
 def test_sha256_file_reports_byte_progress(tmp_path: Path) -> None:
     path = tmp_path / "progress.bin"
     path.write_bytes(b"x" * (2 * 1024 * 1024 + 17))

@@ -39,6 +39,13 @@ CREATE TABLE IF NOT EXISTS media (
 CREATE UNIQUE INDEX IF NOT EXISTS media_provider ON media(source, provider_id)
   WHERE provider_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS media_hash ON media(sha256);
+CREATE TABLE IF NOT EXISTS verification_cache (
+  media_id TEXT PRIMARY KEY REFERENCES media(id) ON DELETE CASCADE,
+  size INTEGER NOT NULL,
+  mtime_ns INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  checked_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS runs (
   id TEXT PRIMARY KEY,
   command TEXT NOT NULL,
@@ -139,6 +146,22 @@ class Database:
     def rows(self) -> list[sqlite3.Row]:
         with self.connect() as connection:
             return list(connection.execute("SELECT * FROM media ORDER BY imported_at, id"))
+
+    def verification_cache(self) -> dict[str, sqlite3.Row]:
+        with self.connect() as connection:
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS verification_cache (
+                   media_id TEXT PRIMARY KEY REFERENCES media(id) ON DELETE CASCADE,
+                   size INTEGER NOT NULL,
+                   mtime_ns INTEGER NOT NULL,
+                   status TEXT NOT NULL,
+                   checked_at TEXT NOT NULL
+                )"""
+            )
+            return {
+                str(row["media_id"]): row
+                for row in connection.execute("SELECT * FROM verification_cache")
+            }
 
     def counts(self) -> dict[str, int]:
         with self.connect() as connection:

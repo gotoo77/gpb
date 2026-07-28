@@ -81,6 +81,10 @@ def _emit(value: Any, as_json: bool = False) -> None:
         typer.echo(f"Skipped:       {value.skipped:,}")
         typer.echo(f"Failed:        {value.failed:,}")
         typer.echo(f"Bytes written: {value.bytes_written:,}")
+        if value.cached or value.bytes_checked or value.bytes_reused:
+            typer.echo(f"Résultats réutilisés: {value.cached:,}")
+            typer.echo(f"Octets lus cette fois: {value.bytes_checked:,}")
+            typer.echo(f"Octets réutilisés   : {value.bytes_reused:,}")
         if value.archives:
             typer.echo("\nPar archive :")
             for archive, counters in value.archives.items():
@@ -672,12 +676,21 @@ def verify(
     show_progress: Annotated[
         bool, typer.Option("--progress/--no-progress", help="Afficher la progression en octets.")
     ] = True,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Relire tous les médias sans réutiliser les vérifications précédentes.",
+        ),
+    ] = False,
 ) -> None:
     """Vérifier l'existence, la taille et le SHA-256 de chaque média local."""
     root = _root(library)
     db = Database(root)
     summary = Summary()
     rows = db.rows()
+    verification_cache = db.verification_cache()
+    cached_results = {} if force else verification_cache
     total_bytes = sum(int(row["size"]) for row in rows)
     completed_bytes = 0
     progress_ui = Progress(
@@ -719,7 +732,37 @@ def verify(
                         description=_progress_label(label),
                     )
                 else:
+                    stat = path.stat()
+                    cached = cached_results.get(str(row["id"]))
+                    if (
+                        cached is not None
+                        and int(cached["size"]) == stat.st_size
+                        and int(cached["mtime_ns"]) == stat.st_mtime_ns
+                    ):
+                        status = str(cached["status"])
+                        summary.cached += 1
+                        summary.bytes_reused += stat.st_size
+                        completed_bytes += stat.st_size
+                        if status == "verified":
+                            summary.already_local += 1
+                        else:
+                            summary.failed += 1
+                            summary.warnings.append(
+                                f"Integrity mismatch: {row['local_path']} (cached)"
+                            )
+                        progress_ui.update(
+                            task,
+                            completed=completed_bytes,
+                            description=_progress_label(label),
+                        )
+                        connection.execute(
+                            "UPDATE media SET verification_status=?, error=? WHERE id=?",
+                            (status, None if status == "verified" else status, row["id"]),
+                        )
+                        connection.commit()
+                        continue
                     digest, size = sha256_file(path, on_block=advance)
+                    summary.bytes_checked += size
                     status = (
                         "verified" if digest == row["sha256"] and size == row["size"] else "corrupt"
                     )
@@ -732,6 +775,26 @@ def verify(
                     "UPDATE media SET verification_status=?, error=? WHERE id=?",
                     (status, None if status == "verified" else status, row["id"]),
                 )
+                if path.is_file():
+                    stat = path.stat()
+                    connection.execute(
+                        """INSERT INTO verification_cache(
+                               media_id, size, mtime_ns, status, checked_at
+                           ) VALUES (?, ?, ?, ?, ?)
+                           ON CONFLICT(media_id) DO UPDATE SET
+                               size=excluded.size,
+                               mtime_ns=excluded.mtime_ns,
+                               status=excluded.status,
+                               checked_at=excluded.checked_at""",
+                        (
+                            row["id"],
+                            stat.st_size,
+                            stat.st_mtime_ns,
+                            status,
+                            datetime.now(UTC).isoformat(),
+                        ),
+                    )
+                connection.commit()
         progress_ui.update(task, description="Vérification terminée")
     _emit(summary, json_output)
     if summary.failed:

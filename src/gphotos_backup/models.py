@@ -43,6 +43,9 @@ class Summary(BaseModel):
     skipped: int = 0
     failed: int = 0
     bytes_written: int = 0
+    cached: int = 0
+    bytes_checked: int = 0
+    bytes_reused: int = 0
     warnings: list[str] = Field(default_factory=list)
     abandoned_partials: list[str] = Field(default_factory=list)
     archives: dict[str, ImportBreakdown] = Field(default_factory=dict)
