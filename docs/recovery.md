@@ -28,7 +28,13 @@ uv run gpb verify
 La commande lit les médias pour retrouver leur SHA-256, rattache les sidecars déjà préservés,
 corrige les dates dans SQLite et déplace atomiquement les fichiers mal classés, notamment ceux de
 `media/1970/01/`. Elle ne recopie pas le contenu des médias. Conservez les archives jusqu’à la fin
-de la réconciliation et de `verify`.
+de la réconciliation et de `verify`. Les mises à jour SQLite sont regroupées par archive pour
+éviter le coût d’une validation par média ; en cas de `Ctrl+C`, les déplacements déjà effectués
+dans l’archive courante sont validés avant l’arrêt.
+
+Attendez le retour au prompt après `reconcile`, puis lancez `verify` séparément. Si plusieurs
+commandes sont collées ensemble, le shell démarre automatiquement la suivante après l’arrêt de la
+précédente.
 
 Après une interruption Picker, relancez `picker download` tant que la session et les URL restent
 valides. Sinon, créez une nouvelle session et sélectionnez à nouveau les éléments. Les identifiants

@@ -715,6 +715,7 @@ def _reconcile_takeout_locked(
             prepared, config
         )
         summary.sidecars_catalogued = len(catalog)
+        rows_by_hash = {str(row["sha256"]): dict(row) for row in db.rows()}
         completed = 0
         if progress:
             progress(0, total_bytes, "Catalogue global des métadonnées construit")
@@ -722,60 +723,80 @@ def _reconcile_takeout_locked(
         for archive_index, input_path, names in prepared:
             source = open_source(input_path)
             try:
-                for name in sorted(names):
-                    if _is_sidecar(name):
-                        continue
-                    summary.media_scanned += 1
-                    member_size = source.size(name)
-                    record = catalog.get(str(safe_archive_name(name)))
-                    label = (
-                        f"[{archive_index}/{len(expanded)}] "
-                        f"{input_path.name[-24:]} · {Path(name).name[-32:]}"
-                    )
-                    if record is None:
-                        completed += member_size
-                        if progress:
-                            progress(completed, total_bytes, label)
-                        continue
-                    summary.metadata_matched += 1
-                    digest_builder = hashlib.sha256()
-                    with source.open(name) as stream:
-                        while block := stream.read(CHUNK):
-                            digest_builder.update(block)
-                            block_size = len(block)
-                            completed += block_size
-                            summary.bytes_read += block_size
-                            if progress:
-                                progress(completed, total_bytes, label)
-                    row = db.by_hash(digest_builder.hexdigest())
-                    if row is None:
-                        summary.missing_from_library += 1
-                        continue
-                    summary.database_matched += 1
-                    capture = _capture(record.metadata)
-                    current = config.library_root / str(row["local_path"])
-                    target = current
-                    if capture is not None and current.is_file():
-                        target = _reconcile_destination(
-                            config.library_root,
-                            Path(name).name,
-                            capture,
-                            digest_builder.hexdigest(),
-                            current,
-                        )
-                        if target != current:
-                            target.parent.mkdir(parents=True, exist_ok=True)
-                            os.replace(current, target)
-                            summary.files_moved += 1
-                    elif not current.is_file():
-                        summary.warnings.append(f"Fichier local introuvable : {current}")
-                    db.update_media_metadata(
-                        str(row["id"]),
-                        capture_time=capture.isoformat() if capture else None,
-                        sidecar_path=record.sidecar_path,
-                        local_path=str(target.relative_to(config.library_root)),
-                    )
-                    summary.metadata_updated += 1
+                with db.connect() as connection:
+                    try:
+                        for name in sorted(names):
+                            if _is_sidecar(name):
+                                continue
+                            summary.media_scanned += 1
+                            member_size = source.size(name)
+                            record = catalog.get(str(safe_archive_name(name)))
+                            label = (
+                                f"[{archive_index}/{len(expanded)}] "
+                                f"{input_path.name[-24:]} · {Path(name).name[-32:]}"
+                            )
+                            if record is None:
+                                completed += member_size
+                                if progress:
+                                    progress(completed, total_bytes, label)
+                                continue
+                            summary.metadata_matched += 1
+                            digest_builder = hashlib.sha256()
+                            with source.open(name) as stream:
+                                while block := stream.read(CHUNK):
+                                    digest_builder.update(block)
+                                    block_size = len(block)
+                                    completed += block_size
+                                    summary.bytes_read += block_size
+                                    if progress:
+                                        progress(completed, total_bytes, label)
+                            digest = digest_builder.hexdigest()
+                            row = rows_by_hash.get(digest)
+                            if row is None:
+                                summary.missing_from_library += 1
+                                continue
+                            summary.database_matched += 1
+                            capture = _capture(record.metadata)
+                            current = config.library_root / str(row["local_path"])
+                            target = current
+                            if capture is not None and current.is_file():
+                                target = _reconcile_destination(
+                                    config.library_root,
+                                    Path(name).name,
+                                    capture,
+                                    digest,
+                                    current,
+                                )
+                                if target != current:
+                                    target.parent.mkdir(parents=True, exist_ok=True)
+                                    os.replace(current, target)
+                                    summary.files_moved += 1
+                            elif not current.is_file():
+                                summary.warnings.append(f"Fichier local introuvable : {current}")
+                            relative_target = str(target.relative_to(config.library_root))
+                            connection.execute(
+                                """UPDATE media
+                                   SET capture_time=?,
+                                       metadata_provenance='takeout-sidecar',
+                                       sidecar_path=?, local_path=?
+                                   WHERE id=?""",
+                                (
+                                    capture.isoformat() if capture else None,
+                                    record.sidecar_path,
+                                    relative_target,
+                                    row["id"],
+                                ),
+                            )
+                            row["capture_time"] = capture.isoformat() if capture else None
+                            row["metadata_provenance"] = "takeout-sidecar"
+                            row["sidecar_path"] = record.sidecar_path
+                            row["local_path"] = relative_target
+                            summary.metadata_updated += 1
+                    except BaseException:
+                        # Files already moved in this archive must remain in sync
+                        # with their SQLite rows before propagating SIGINT/errors.
+                        connection.commit()
+                        raise
             finally:
                 source.close()
         db.finish_run(run_id, summary.model_dump(), "success")

@@ -625,3 +625,46 @@ def test_reconcile_links_cross_volume_sidecar_and_moves_existing_media(
     assert corrected_path.read_bytes() == b"reconcile-photo"
     assert "media/2024/01/" in str(corrected_path)
     assert not original_path.exists()
+
+
+def test_reconcile_sigint_commits_paths_of_files_already_moved(
+    library: tuple[Path, Database], tmp_path: Path
+) -> None:
+    root, db = library
+    media = tmp_path / "media.zip"
+    sidecars = tmp_path / "sidecars.zip"
+    members = {
+        "Takeout/Google Photos/Photos/a.jpg": b"a" * 1024,
+        "Takeout/Google Photos/Photos/b.jpg": b"b" * 1024,
+    }
+    make_zip(media, members)
+    import_takeout([media], load(root), db)
+    make_zip(
+        sidecars,
+        {
+            f"{name}.supplemental-metadata.json": json.dumps(
+                {"photoTakenTime": {"timestamp": "1704067200"}}
+            ).encode()
+            for name in members
+        },
+    )
+    interrupted = False
+
+    def interrupt_second_media(completed: int, _total: int, _label: str) -> None:
+        nonlocal interrupted
+        if completed > 1024 and not interrupted:
+            interrupted = True
+            os.kill(os.getpid(), signal.SIGINT)
+
+    with pytest.raises(KeyboardInterrupt):
+        takeout_module.reconcile_takeout(
+            [sidecars, media],
+            load(root),
+            db,
+            progress=interrupt_second_media,
+        )
+
+    assert interrupted
+    rows = db.rows()
+    assert all((root / str(row["local_path"])).is_file() for row in rows)
+    assert sum(row["capture_time"] is not None for row in rows) == 1

@@ -26,6 +26,11 @@ uv run gpb verify
 The command reads media to recover their SHA-256, links preserved sidecars, corrects dates in
 SQLite, and atomically moves misplaced files, including files under `media/1970/01/`. It does not
 copy media content again. Keep the archives until both reconciliation and `verify` have completed.
+SQLite updates are batched per archive to avoid committing once per media item; on Ctrl+C, moves
+already completed in the current archive are committed before stopping.
+
+Wait for the prompt to return after `reconcile`, then run `verify` separately. If several commands
+are pasted together, the shell automatically starts the next one after the previous command stops.
 
 After a Picker interruption, rerun `picker download` while the session and URLs remain valid.
 Otherwise create a new session and select the items again. Provider IDs and hashes prevent
