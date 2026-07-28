@@ -850,6 +850,41 @@ def test_scan_and_manifest_export_support_progress_options(
     assert len(manifest.read_text(encoding="utf-8").splitlines()) == 1
 
 
+def test_cli_help_explains_every_command_group() -> None:
+    root_help = CliRunner().invoke(app, ["--help"], catch_exceptions=False)
+    assert root_help.exit_code == 0
+    for description in (
+        "Initialiser une nouvelle bibliothèque",
+        "Indexer les médias locaux",
+        "Vérifier l'existence",
+        "Afficher l'état de la bibliothèque",
+        "Exporter l'inventaire SQLite",
+        "Diagnostiquer la configuration",
+        "Configurer et contrôler",
+        "Télécharger une sélection explicite",
+        "Contrôler, importer et réconcilier",
+    ):
+        assert description in root_help.output
+
+    for group, descriptions in {
+        "auth": ("Authentifier gpb", "Afficher l'état"),
+        "picker": (
+            "Créer une session Picker",
+            "Vérifier si la sélection",
+            "Télécharger les médias",
+        ),
+        "takeout": (
+            "Importer des archives Takeout",
+            "Contrôler intégralement",
+            "Rattacher les sidecars",
+            "Alias pratique",
+        ),
+    }.items():
+        result = CliRunner().invoke(app, [group, "--help"], catch_exceptions=False)
+        assert result.exit_code == 0
+        assert all(description in result.output for description in descriptions)
+
+
 def test_reconcile_cli_json_contains_complete_report(
     library: tuple[Path, Database], tmp_path: Path
 ) -> None:

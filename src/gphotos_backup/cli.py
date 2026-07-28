@@ -38,10 +38,10 @@ from .takeout import (
 )
 from .util import sha256_file
 
-app = typer.Typer(help="Reliable local Google Photos archive.")
-auth_app = typer.Typer(help="OAuth authentication.")
-picker_app = typer.Typer(help="Import an explicit Google Photos selection.")
-takeout_app = typer.Typer(help="Import Google Takeout archives.")
+app = typer.Typer(help="Archive locale fiable pour Google Photos.")
+auth_app = typer.Typer(help="Configurer et contrôler l'authentification OAuth.")
+picker_app = typer.Typer(help="Télécharger une sélection explicite via Google Photos Picker.")
+takeout_app = typer.Typer(help="Contrôler, importer et réconcilier des archives Google Takeout.")
 app.add_typer(auth_app, name="auth")
 app.add_typer(picker_app, name="picker")
 app.add_typer(takeout_app, name="takeout")
@@ -123,9 +123,11 @@ def _emit(value: Any, as_json: bool = False) -> None:
 def main(
     ctx: typer.Context,
     version: Annotated[
-        bool, typer.Option("--version", help="Show version and exit.", is_eager=True)
+        bool, typer.Option("--version", help="Afficher la version et quitter.", is_eager=True)
     ] = False,
-    verbose: Annotated[bool, typer.Option("--verbose", help="Enable diagnostic output.")] = False,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", help="Activer les diagnostics détaillés.")
+    ] = False,
 ) -> None:
     ctx.ensure_object(dict)
     ctx.obj["verbose"] = verbose
@@ -138,9 +140,10 @@ def main(
 
 @app.command("init")
 def initialize(
-    library: Annotated[Path, typer.Option("--library", help="Local library root.")],
+    library: Annotated[Path, typer.Option("--library", help="Racine de la bibliothèque locale.")],
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
+    """Initialiser une nouvelle bibliothèque locale et sa base SQLite."""
     root = library.expanduser().resolve()
     path = write_config(root)
     db = Database(root)
@@ -150,6 +153,7 @@ def initialize(
 
 @auth_app.command("login")
 def auth_login(library: Annotated[Path | None, typer.Option("--library")] = None) -> None:
+    """Authentifier gpb auprès de Google avec OAuth."""
     with Console(stderr=True).status("Authentification OAuth en cours…"):
         oauth.login(_root(library))
     typer.echo("OAuth login completed.")
@@ -160,6 +164,7 @@ def auth_status(
     library: Annotated[Path | None, typer.Option("--library")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
+    """Afficher l'état de l'authentification OAuth locale."""
     activity = (
         nullcontext() if json_output else Console(stderr=True).status("Lecture de l'état OAuth…")
     )
@@ -183,6 +188,7 @@ def picker_create(
     library: Annotated[Path | None, typer.Option("--library")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
+    """Créer une session Picker et afficher l'URL de sélection Google."""
     from .picker import PickerClient
 
     root = _root(library)
@@ -218,6 +224,7 @@ def picker_poll(
     library: Annotated[Path | None, typer.Option("--library")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
+    """Vérifier si la sélection d'une session Picker est prête."""
     from .picker import PickerClient
 
     root = _root(library)
@@ -253,6 +260,7 @@ def picker_download(
         bool, typer.Option("--progress/--no-progress", help="Afficher la progression.")
     ] = True,
 ) -> None:
+    """Télécharger les médias sélectionnés dans la dernière session Picker."""
     from .picker import download_session
 
     config = load(library)
@@ -318,6 +326,7 @@ def takeout_import(
         bool, typer.Option("--progress/--no-progress", help="Afficher la progression en octets.")
     ] = True,
 ) -> None:
+    """Importer des archives Takeout de manière atomique et idempotente."""
     try:
         config = load(library)
         db = Database(config.library_root)
@@ -583,6 +592,7 @@ def scan(
         bool, typer.Option("--progress/--no-progress", help="Afficher la progression en octets.")
     ] = True,
 ) -> None:
+    """Indexer les médias locaux présents mais absents de la base SQLite."""
     config = load(library)
     db = Database(config.library_root)
     summary = Summary()
@@ -655,6 +665,7 @@ def verify(
         bool, typer.Option("--progress/--no-progress", help="Afficher la progression en octets.")
     ] = True,
 ) -> None:
+    """Vérifier l'existence, la taille et le SHA-256 de chaque média local."""
     root = _root(library)
     db = Database(root)
     summary = Summary()
@@ -724,6 +735,7 @@ def status(
     library: Annotated[Path | None, typer.Option("--library")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
+    """Afficher l'état de la bibliothèque et du dernier traitement."""
     try:
         root = _root(library)
     except (FileNotFoundError, ValueError) as error:
@@ -761,6 +773,7 @@ def export_manifest(
         bool, typer.Option("--progress/--no-progress", help="Afficher la progression.")
     ] = True,
 ) -> None:
+    """Exporter l'inventaire SQLite dans un manifeste JSON Lines."""
     root = _root(library)
     db = Database(root)
     target = output or root / "manifests" / f"manifest-{datetime.now(UTC):%Y%m%dT%H%M%SZ}.jsonl"
@@ -801,6 +814,7 @@ def doctor(
         bool, typer.Option("--online", help="Also probe the official Picker endpoint.")
     ] = False,
 ) -> None:
+    """Diagnostiquer la configuration, le disque, SQLite et les dépendances."""
     checks: list[dict[str, str]] = []
     checks.append(
         {
