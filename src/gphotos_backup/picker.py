@@ -5,6 +5,7 @@ import mimetypes
 import os
 import random
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,7 @@ from .models import LibraryConfig, PickedMedia, Summary
 from .util import destination
 
 API = "https://photospicker.googleapis.com/v1"
+PickerProgressCallback = Callable[[int, int, int, int | None, str], None]
 
 
 class PickerClient:
@@ -82,38 +84,57 @@ def content_url(item: PickedMedia) -> str:
 
 
 def download_session(
-    session_id: str, config: LibraryConfig, db: Database, *, dry_run: bool = False
+    session_id: str,
+    config: LibraryConfig,
+    db: Database,
+    *,
+    dry_run: bool = False,
+    progress: PickerProgressCallback | None = None,
 ) -> Summary:
     client = PickerClient(config.library_root)
     summary = Summary()
-    for item in client.list_items(session_id):
+    items = client.list_items(session_id)
+    for index, item in enumerate(items, start=1):
+        label = f"[{index}/{len(items)}] {item.filename}"
+        if progress:
+            progress(index, len(items), 0, None, label)
         summary.scanned += 1
         if db.by_provider("picker", item.provider_id):
             summary.already_local += 1
+            if progress:
+                progress(index, len(items), 1, 1, f"{label} · déjà présent")
             continue
         if dry_run:
             summary.imported += 1
+            if progress:
+                progress(index, len(items), 1, 1, f"{label} · simulation")
             continue
         partial_id = hashlib.sha256(item.provider_id.encode()).hexdigest()[:24]
         partial = config.library_root / ".gphotos-backup" / f"{partial_id}.partial"
         digest = hashlib.sha256()
         size = 0
+        expected_size: int | None = None
         try:
             with client.client.stream(
                 "GET", content_url(item), headers=client.headers(), follow_redirects=True
             ) as response:
                 response.raise_for_status()
                 expected = response.headers.get("content-length")
+                expected_size = int(expected) if expected is not None else None
                 with partial.open("wb") as output:
                     for block in response.iter_bytes(1024 * 1024):
                         output.write(block)
                         digest.update(block)
                         size += len(block)
+                        if progress:
+                            progress(index, len(items), size, expected_size, label)
                 if expected is not None and size != int(expected):
                     raise OSError(f"Short download: expected {expected} bytes, received {size}")
             hexdigest = digest.hexdigest()
             if db.by_hash(hexdigest):
                 summary.already_local += 1
+                if progress:
+                    progress(index, len(items), size, expected_size or size, f"{label} · doublon")
                 continue
             target = destination(config.library_root, item.filename, item.create_time, hexdigest)
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -139,9 +160,13 @@ def download_session(
             )
             summary.imported += 1
             summary.bytes_written += size
+            if progress:
+                progress(index, len(items), size, expected_size or size, f"{label} · terminé")
         except (OSError, httpx.HTTPError) as error:
             summary.failed += 1
             summary.warnings.append(f"{item.filename}: {error}")
+            if progress:
+                progress(index, len(items), size, expected_size, f"{label} · échec")
         finally:
             partial.unlink(missing_ok=True)
     return summary

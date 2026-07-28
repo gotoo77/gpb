@@ -52,6 +52,14 @@ fichiers `.partial` actifs des fichiers abandonnés et expose le résultat du de
 verrou empêche deux imports simultanés dans la même bibliothèque. Après `Ctrl+C` ou une erreur de
 disque plein, relancez la même commande : les médias déjà terminés ne sont pas recopiés.
 
+## Progression des commandes
+
+Toutes les opérations potentiellement longues affichent leur progression : imports et contrôles
+Takeout, réconciliation, vérification d’intégrité, téléchargement Picker, analyse locale et export
+du manifeste. Les attentes réseau plus courtes affichent un indicateur d’activité. L’option
+`--no-progress` désactive les barres lorsqu’elle est disponible ; `--json` supprime automatiquement
+toute animation pour garantir une sortie machine propre.
+
 Google peut placer un média et son JSON `supplemental-metadata` dans des volumes différents. `gpb`
 construit donc un catalogue global avant l’import. Pour une bibliothèque créée avec une version
 antérieure, `takeout reconcile` rattache ces JSON, corrige les dates et déplace atomiquement les

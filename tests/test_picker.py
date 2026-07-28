@@ -5,8 +5,10 @@ from types import SimpleNamespace
 import httpx
 
 from gphotos_backup import picker
+from gphotos_backup.config import load, write_config
+from gphotos_backup.db import Database
 from gphotos_backup.models import PickedMedia
-from gphotos_backup.picker import PickerClient, content_url
+from gphotos_backup.picker import PickerClient, content_url, download_session
 
 
 def test_picker_content_parameters() -> None:
@@ -68,3 +70,63 @@ def test_picker_client_paginates_and_retries(monkeypatch, tmp_path) -> None:
     client = PickerClient(tmp_path, transport=httpx.MockTransport(handler))
     assert [value.provider_id for value in client.list_items("session")] == ["1", "2"]
     assert calls == 3
+
+
+def test_picker_download_reports_item_and_byte_progress(monkeypatch, tmp_path) -> None:
+    root = tmp_path / "library"
+    write_config(root)
+    db = Database(root)
+    db.initialize()
+    item = PickedMedia(
+        provider_id="photo",
+        filename="photo.jpg",
+        mime_type="image/jpeg",
+        base_url="https://media/photo",
+    )
+
+    class Response:
+        def __init__(self) -> None:
+            self.headers = {"content-length": "6"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def iter_bytes(self, _size: int):
+            yield b"abc"
+            yield b"def"
+
+    class HttpClient:
+        def stream(self, *_args, **_kwargs):
+            return Response()
+
+    class Client:
+        client = HttpClient()
+
+        def __init__(self, _root) -> None:
+            pass
+
+        def list_items(self, _session: str):
+            return [item]
+
+        def headers(self):
+            return {"Authorization": "Bearer test"}
+
+    monkeypatch.setattr(picker, "PickerClient", Client)
+    events: list[tuple[int, int, int, int | None, str]] = []
+
+    summary = download_session(
+        "session",
+        load(root),
+        db,
+        progress=lambda *event: events.append(event),
+    )
+
+    assert summary.imported == 1
+    assert events[-1][:4] == (1, 1, 6, 6)
+    assert "terminé" in events[-1][4]

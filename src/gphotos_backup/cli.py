@@ -5,6 +5,7 @@ import os
 import shutil
 import sqlite3
 import sys
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -149,7 +150,8 @@ def initialize(
 
 @auth_app.command("login")
 def auth_login(library: Annotated[Path | None, typer.Option("--library")] = None) -> None:
-    oauth.login(_root(library))
+    with Console(stderr=True).status("Authentification OAuth en cours…"):
+        oauth.login(_root(library))
     typer.echo("OAuth login completed.")
 
 
@@ -158,7 +160,12 @@ def auth_status(
     library: Annotated[Path | None, typer.Option("--library")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    _emit(oauth.status(_root(library)), json_output)
+    activity = (
+        nullcontext() if json_output else Console(stderr=True).status("Lecture de l'état OAuth…")
+    )
+    with activity:
+        result = oauth.status(_root(library))
+    _emit(result, json_output)
 
 
 def _latest_session(db: Database) -> str:
@@ -180,7 +187,13 @@ def picker_create(
 
     root = _root(library)
     db = Database(root)
-    data = PickerClient(root).create_session()
+    activity = (
+        nullcontext()
+        if json_output
+        else Console(stderr=True).status("Création de la session Picker…")
+    )
+    with activity:
+        data = PickerClient(root).create_session()
     now = datetime.now(UTC).isoformat()
     with db.connect() as connection:
         connection.execute(
@@ -210,7 +223,13 @@ def picker_poll(
     root = _root(library)
     db = Database(root)
     session_id = session or _latest_session(db)
-    data = PickerClient(root).get_session(session_id)
+    activity = (
+        nullcontext()
+        if json_output
+        else Console(stderr=True).status("Interrogation de la session Picker…")
+    )
+    with activity:
+        data = PickerClient(root).get_session(session_id)
     ready = bool(data.get("mediaItemsSet"))
     with db.connect() as connection:
         connection.execute(
@@ -230,15 +249,62 @@ def picker_download(
     dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
     jobs: Annotated[int, typer.Option("--jobs", min=1, max=32)] = 4,
     json_output: Annotated[bool, typer.Option("--json")] = False,
+    show_progress: Annotated[
+        bool, typer.Option("--progress/--no-progress", help="Afficher la progression.")
+    ] = True,
 ) -> None:
     from .picker import download_session
 
     config = load(library)
     config.jobs = jobs
     db = Database(config.library_root)
-    _emit(
-        download_session(session or _latest_session(db), config, db, dry_run=dry_run), json_output
+    progress_ui = Progress(
+        SpinnerColumn(),
+        TextColumn("{task.description}", markup=False),
+        BarColumn(),
+        TaskProgressColumn(),
+        DownloadColumn(),
+        TransferSpeedColumn(),
+        TimeRemainingColumn(),
+        console=Console(stderr=True),
+        disable=json_output or not show_progress,
     )
+    with progress_ui:
+        task = progress_ui.add_task("Lecture de la sélection Picker…", total=None)
+        current_item = 0
+
+        def update_progress(
+            item_index: int,
+            item_count: int,
+            completed: int,
+            total: int | None,
+            label: str,
+        ) -> None:
+            nonlocal current_item
+            if item_index != current_item:
+                progress_ui.reset(
+                    task,
+                    completed=0,
+                    total=total,
+                    description=label[-70:],
+                )
+                current_item = item_index
+            progress_ui.update(
+                task,
+                completed=completed,
+                total=total,
+                description=f"{label[-55:]} · média {item_index}/{item_count}",
+            )
+
+        summary = download_session(
+            session or _latest_session(db),
+            config,
+            db,
+            dry_run=dry_run,
+            progress=update_progress,
+        )
+        progress_ui.update(task, description="Téléchargement Picker terminé")
+    _emit(summary, json_output)
 
 
 @takeout_app.command("import")
@@ -513,36 +579,71 @@ def scan(
     library: Annotated[Path | None, typer.Option("--library")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
     dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
+    show_progress: Annotated[
+        bool, typer.Option("--progress/--no-progress", help="Afficher la progression en octets.")
+    ] = True,
 ) -> None:
     config = load(library)
     db = Database(config.library_root)
     summary = Summary()
     indexed = {str(row["local_path"]) for row in db.rows()}
-    for path in sorted((config.library_root / "media").rglob("*")):
-        if not path.is_file() or path.name.endswith(".partial"):
-            continue
-        summary.scanned += 1
-        relative = str(path.relative_to(config.library_root))
-        if relative in indexed:
-            summary.already_local += 1
-            continue
-        digest, size = sha256_file(path)
-        if db.by_hash(digest):
-            summary.already_local += 1
-            continue
-        if not dry_run:
-            db.add_media(
-                {
-                    "source": "local",
-                    "original_name": path.name,
-                    "local_path": relative,
-                    "size": size,
-                    "sha256": digest,
-                    "download_status": "complete",
-                    "metadata_provenance": "filesystem",
-                }
-            )
-        summary.imported += 1
+    progress_ui = Progress(
+        SpinnerColumn(),
+        TextColumn("{task.description}", markup=False),
+        BarColumn(),
+        TaskProgressColumn(),
+        DownloadColumn(),
+        TransferSpeedColumn(),
+        TimeRemainingColumn(),
+        console=Console(stderr=True),
+        disable=json_output or not show_progress,
+    )
+    with progress_ui:
+        task = progress_ui.add_task("Inventaire des fichiers locaux…", total=None)
+        files = sorted(
+            path
+            for path in (config.library_root / "media").rglob("*")
+            if path.is_file() and not path.name.endswith(".partial")
+        )
+        total_bytes = sum(path.stat().st_size for path in files)
+        completed_bytes = 0
+        progress_ui.update(task, total=total_bytes)
+        for index, path in enumerate(files, start=1):
+            summary.scanned += 1
+            relative = str(path.relative_to(config.library_root))
+            label = f"[{index}/{len(files)}] {relative}"
+
+            def advance(block_size: int, current_label: str = label) -> None:
+                nonlocal completed_bytes
+                completed_bytes += block_size
+                progress_ui.update(
+                    task,
+                    completed=completed_bytes,
+                    description=current_label[-70:],
+                )
+
+            if relative in indexed:
+                summary.already_local += 1
+                advance(path.stat().st_size)
+                continue
+            digest, size = sha256_file(path, on_block=advance)
+            if db.by_hash(digest):
+                summary.already_local += 1
+                continue
+            if not dry_run:
+                db.add_media(
+                    {
+                        "source": "local",
+                        "original_name": path.name,
+                        "local_path": relative,
+                        "size": size,
+                        "sha256": digest,
+                        "download_status": "complete",
+                        "metadata_provenance": "filesystem",
+                    }
+                )
+            summary.imported += 1
+        progress_ui.update(task, description="Analyse locale terminée")
     _emit(summary, json_output)
 
 
@@ -656,15 +757,38 @@ def status(
 def export_manifest(
     library: Annotated[Path | None, typer.Option("--library")] = None,
     output: Annotated[Path | None, typer.Option("--output")] = None,
+    show_progress: Annotated[
+        bool, typer.Option("--progress/--no-progress", help="Afficher la progression.")
+    ] = True,
 ) -> None:
     root = _root(library)
     db = Database(root)
     target = output or root / "manifests" / f"manifest-{datetime.now(UTC):%Y%m%dT%H%M%SZ}.jsonl"
     temporary = target.with_suffix(target.suffix + ".partial")
-    with temporary.open("w", encoding="utf-8") as stream:
-        for row in db.rows():
-            safe = {key: row[key] for key in row if key != "remote_url"}
-            stream.write(json.dumps(safe, sort_keys=True, ensure_ascii=False) + "\n")
+    rows = db.rows()
+    progress_ui = Progress(
+        SpinnerColumn(),
+        TextColumn("{task.description}", markup=False),
+        BarColumn(),
+        TaskProgressColumn(),
+        TextColumn("{task.completed:.0f}/{task.total:.0f} entrées"),
+        TimeRemainingColumn(),
+        console=Console(stderr=True),
+        disable=not show_progress,
+    )
+    with progress_ui:
+        task = progress_ui.add_task("Export du manifeste…", total=len(rows))
+        with temporary.open("w", encoding="utf-8") as stream:
+            for index, row in enumerate(rows, start=1):
+                safe = dict(row)
+                safe.pop("remote_url", None)
+                stream.write(json.dumps(safe, sort_keys=True, ensure_ascii=False) + "\n")
+                progress_ui.update(
+                    task,
+                    completed=index,
+                    description=f"Export du manifeste [{index}/{len(rows)}]",
+                )
+        progress_ui.update(task, description="Manifeste exporté")
     temporary.replace(target)
     typer.echo(str(target))
 
@@ -735,10 +859,16 @@ def doctor(
             import httpx
 
             try:
-                response = httpx.get(
-                    "https://photospicker.googleapis.com/v1/sessions/connectivity-probe",
-                    timeout=5.0,
+                activity = (
+                    nullcontext()
+                    if json_output
+                    else Console(stderr=True).status("Test de connectivité Picker…")
                 )
+                with activity:
+                    response = httpx.get(
+                        "https://photospicker.googleapis.com/v1/sessions/connectivity-probe",
+                        timeout=5.0,
+                    )
                 reachable = response.status_code in {400, 401, 403, 404}
                 checks.append(
                     {

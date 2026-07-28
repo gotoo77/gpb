@@ -50,6 +50,13 @@ active `.partial` files from abandoned ones and exposes the latest run result. A
 simultaneous imports into the same library. After Ctrl+C or a full-disk error, rerun the same
 command: already completed media are not copied again.
 
+## Command progress
+
+Every potentially long operation reports progress: Takeout imports and checks, reconciliation,
+integrity verification, Picker downloads, local scans, and manifest exports. Shorter network waits
+display an activity indicator. `--no-progress` disables bars where available; `--json`
+automatically suppresses every animation to guarantee clean machine-readable output.
+
 Google may place a media item and its `supplemental-metadata` JSON in different volumes. `gpb`
 therefore builds a global catalog before importing. For a library created with an earlier version,
 `takeout reconcile` links those JSON files, corrects dates, and atomically moves affected media

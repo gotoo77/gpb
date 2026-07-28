@@ -817,6 +817,39 @@ def test_sha256_file_reports_byte_progress(tmp_path: Path) -> None:
     assert len(blocks) == 3
 
 
+def test_scan_and_manifest_export_support_progress_options(
+    library: tuple[Path, Database], tmp_path: Path
+) -> None:
+    root, _db = library
+    local = root / "media" / "untracked.jpg"
+    local.write_bytes(b"untracked")
+
+    scan_result = CliRunner().invoke(
+        app,
+        ["scan", "--library", str(root), "--no-progress", "--json"],
+        catch_exceptions=False,
+    )
+    assert scan_result.exit_code == 0
+    assert json.loads(scan_result.output)["imported"] == 1
+
+    manifest = tmp_path / "manifest.jsonl"
+    export_result = CliRunner().invoke(
+        app,
+        [
+            "export-manifest",
+            "--library",
+            str(root),
+            "--output",
+            str(manifest),
+            "--no-progress",
+        ],
+        catch_exceptions=False,
+    )
+    assert export_result.exit_code == 0
+    assert manifest.is_file()
+    assert len(manifest.read_text(encoding="utf-8").splitlines()) == 1
+
+
 def test_reconcile_cli_json_contains_complete_report(
     library: tuple[Path, Database], tmp_path: Path
 ) -> None:
