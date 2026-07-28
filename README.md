@@ -75,6 +75,12 @@ comme `README.md` ou `docs/recovery.md`. Chaque document possède une traduction
 `.en.md` et un sélecteur `[Français] | [English]` placé sous son titre. Les deux versions sont
 mises à jour ensemble.
 
+## Visibilité des opérations longues
+
+Toute commande longue indique sa phase, sa position globale, le volume et l’élément traités, ainsi
+qu’une progression mesurable. Elle se termine par un compte rendu lisible ; `--json` fournit les
+mêmes résultats sous une forme structurée pour l’automatisation.
+
 Consultez également les documents sur les [limitations](docs/limitations.md), la
 [récupération](docs/recovery.md), la [sécurité](docs/security.md) et la
 [roadmap](docs/roadmap.md).

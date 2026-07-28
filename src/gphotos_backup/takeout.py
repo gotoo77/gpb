@@ -316,6 +316,8 @@ def _sidecar_media_key(name: str, media_names: set[str]) -> str | None:
 def _build_metadata_catalog(
     prepared: list[tuple[int, Path, set[str]]],
     config: LibraryConfig,
+    *,
+    progress: ProgressCallback | None = None,
 ) -> tuple[dict[str, MetadataRecord], int, int, int]:
     media_names = {
         name for _index, _path, names in prepared for name in names if not _is_sidecar(name)
@@ -332,10 +334,23 @@ def _build_metadata_catalog(
             else:
                 references[(input_path, name)] = key
 
-    preserved_by_key: dict[str, list[str]] = {}
+    sidecar_total_bytes = 0
     for _index, input_path, names in prepared:
         source = open_source(input_path)
         try:
+            sidecar_total_bytes += sum(source.size(name) for name in names if _is_sidecar(name))
+        finally:
+            source.close()
+    if progress and sidecar_total_bytes:
+        progress(0, sidecar_total_bytes, "Inventaire des métadonnées terminé")
+
+    preserved_by_key: dict[str, list[str]] = {}
+    sidecar_completed_bytes = 0
+    sidecars_processed = 0
+    for archive_index, input_path, names in prepared:
+        source = open_source(input_path)
+        try:
+            archive_sidecars = 0
             for name in names:
                 if not _is_sidecar(name):
                     continue
@@ -346,8 +361,19 @@ def _build_metadata_catalog(
                     else "orphan"
                 )
                 sidecar_path = _preserve_sidecar(source, name, config, label)
+                sidecar_completed_bytes += source.size(name)
+                sidecars_processed += 1
+                archive_sidecars += 1
                 if key is not None:
                     preserved_by_key.setdefault(key, []).append(sidecar_path)
+            if progress and sidecar_total_bytes:
+                progress(
+                    sidecar_completed_bytes,
+                    sidecar_total_bytes,
+                    f"Métadonnées [{archive_index}/{len(prepared)}] "
+                    f"{input_path.name[-24:]} · {archive_sidecars} JSON "
+                    f"({sidecars_processed} au total)",
+                )
         finally:
             source.close()
 
@@ -498,7 +524,7 @@ def _import_takeout_locked(
                     orphan_count,
                     ambiguous_count,
                     malformed_count,
-                ) = _build_metadata_catalog(prepared, config)
+                ) = _build_metadata_catalog(prepared, config, progress=progress)
                 if orphan_count:
                     summary.warnings.append(
                         f"{orphan_count} sidecar(s) JSON sans média correspondant ont été "
@@ -727,7 +753,7 @@ def _reconcile_takeout_locked(
             summary.orphan_sidecars,
             summary.ambiguous_sidecars,
             summary.malformed_sidecars,
-        ) = _build_metadata_catalog(prepared, config)
+        ) = _build_metadata_catalog(prepared, config, progress=progress)
         summary.sidecars_catalogued = len(catalog)
         rows_by_hash = {str(row["sha256"]): dict(row) for row in db.rows()}
         completed = 0

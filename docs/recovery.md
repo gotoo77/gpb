@@ -37,6 +37,12 @@ exploitable ne remplace jamais une date SQLite existante par une valeur vide. Le
 sont conservés mais ignorés ; les sidecars orphelins, les associations ambiguës et les métadonnées
 sans date disposent de compteurs distincts dans le rapport final.
 
+La progression distingue le catalogue des métadonnées de la lecture des médias. Pendant le
+catalogue, elle affiche `[volume/total]`, le volume courant, le nombre de JSON du volume, le cumul
+et les octets traités. La phase média affiche en plus le fichier courant. Le rapport final détaille
+les associations, mises à jour, déplacements, absences et anomalies ; `--json` retourne les mêmes
+compteurs.
+
 Attendez le retour au prompt après `reconcile`, puis lancez `verify` séparément. Si plusieurs
 commandes sont collées ensemble, le shell démarre automatiquement la suivante après l’arrêt de la
 précédente.

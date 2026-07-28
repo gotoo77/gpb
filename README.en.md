@@ -72,6 +72,12 @@ French is the default language: canonical files use names without a language suf
 `README.md` or `docs/recovery.md`. Every document has an English `.en.md` translation and a
 `[Français] | [English]` switch immediately below its title. Both versions are updated together.
 
+## Long-running operation visibility
+
+Every long-running command reports its current phase, global position, volume and item being
+processed, together with measurable progress. It ends with a readable completion report; `--json`
+provides the same results in a structured form for automation.
+
 See also the documentation covering [limitations](docs/limitations.en.md),
 [recovery](docs/recovery.en.md), [security](docs/security.en.md), and the
 [roadmap](docs/roadmap.en.md).

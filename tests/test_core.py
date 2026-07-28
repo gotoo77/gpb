@@ -582,7 +582,13 @@ def test_sidecar_in_another_volume_is_associated_during_import(
     )
     make_zip(media, {member: b"cross-volume-photo"})
 
-    summary = import_takeout([sidecars, media], load(root), db)
+    events: list[tuple[int, int, str]] = []
+    summary = import_takeout(
+        [sidecars, media],
+        load(root),
+        db,
+        progress=lambda *event: events.append(event),
+    )
 
     assert summary.imported == 1
     assert len(summary.warnings) == 0
@@ -591,6 +597,8 @@ def test_sidecar_in_another_volume_is_associated_during_import(
     assert row["metadata_provenance"] == "takeout-sidecar"
     assert row["sidecar_path"] is not None
     assert row["local_path"].startswith("media/2024/01/")
+    assert any("Métadonnées [1/2]" in event[2] for event in events)
+    assert any("[2/2]" in event[2] and "cross-volume.jpg" in event[2] for event in events)
 
 
 def test_reconcile_links_cross_volume_sidecar_and_moves_existing_media(
@@ -721,3 +729,46 @@ def test_reconcile_preserves_but_ignores_malformed_json(
     assert updated["capture_time"] == original["capture_time"]
     assert updated["local_path"] == original["local_path"]
     assert list((root / "metadata").iterdir())
+
+
+def test_reconcile_cli_json_contains_complete_report(
+    library: tuple[Path, Database], tmp_path: Path
+) -> None:
+    root, db = library
+    member = "Takeout/Google Photos/Photos/report.jpg"
+    media = tmp_path / "media.zip"
+    sidecars = tmp_path / "sidecars.zip"
+    make_zip(media, {member: b"report-media"})
+    import_takeout([media], load(root), db)
+    make_zip(
+        sidecars,
+        {
+            f"{member}.supplemental-metadata.json": json.dumps(
+                {"photoTakenTime": {"timestamp": "1704067200"}}
+            ).encode()
+        },
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "takeout",
+            "reconcile",
+            "--library",
+            str(root),
+            "--json",
+            str(sidecars),
+            str(media),
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["media_scanned"] == 1
+    assert payload["metadata_matched"] == 1
+    assert payload["database_matched"] == 1
+    assert payload["metadata_updated"] == 1
+    assert payload["files_moved"] == 1
+    assert "malformed_sidecars" in payload
+    assert "metadata_without_date" in payload

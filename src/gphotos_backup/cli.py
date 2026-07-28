@@ -89,6 +89,7 @@ def _emit(value: Any, as_json: bool = False) -> None:
         typer.echo(f"Médias analysés       : {value.media_scanned:,}")
         typer.echo(f"Métadonnées associées : {value.metadata_matched:,}")
         typer.echo(f"Médias locaux trouvés : {value.database_matched:,}")
+        typer.echo(f"Absents de la bibliothèque: {value.missing_from_library:,}")
         typer.echo(f"Fiches mises à jour   : {value.metadata_updated:,}")
         typer.echo(f"Fichiers déplacés     : {value.files_moved:,}")
         typer.echo(f"Sidecars catalogués   : {value.sidecars_catalogued:,}")

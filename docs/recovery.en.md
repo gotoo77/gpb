@@ -34,6 +34,11 @@ replaces an existing SQLite date with an empty value. Malformed JSON files are p
 ignored; orphan sidecars, ambiguous matches, and dateless metadata have separate counters in the
 completion report.
 
+Progress distinguishes metadata cataloging from media reading. During cataloging it displays
+`[volume/total]`, the current volume, JSON count for that volume, cumulative count, and processed
+bytes. The media phase also displays the current file. The completion report details matches,
+updates, moves, missing media, and anomalies; `--json` returns the same counters.
+
 Wait for the prompt to return after `reconcile`, then run `verify` separately. If several commands
 are pasted together, the shell automatically starts the next one after the previous command stops.
 

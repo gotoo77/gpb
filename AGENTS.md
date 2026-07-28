@@ -7,3 +7,5 @@
 - Les deux versions affichent immédiatement sous leur titre le sélecteur
   `[Français](...) | [English](...)`.
 - Toute modification documentaire met à jour les deux langues dans le même changement.
+- Toute opération CLI longue expose sa phase courante, sa position globale, l’élément traité et une
+  progression mesurable. Elle produit un compte rendu final lisible et une sortie JSON structurée.
