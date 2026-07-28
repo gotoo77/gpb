@@ -316,7 +316,7 @@ def _sidecar_media_key(name: str, media_names: set[str]) -> str | None:
 def _build_metadata_catalog(
     prepared: list[tuple[int, Path, set[str]]],
     config: LibraryConfig,
-) -> tuple[dict[str, MetadataRecord], int, int]:
+) -> tuple[dict[str, MetadataRecord], int, int, int]:
     media_names = {
         name for _index, _path, names in prepared for name in names if not _is_sidecar(name)
     }
@@ -353,6 +353,7 @@ def _build_metadata_catalog(
 
     catalog: dict[str, MetadataRecord] = {}
     ambiguous = 0
+    malformed = 0
     for key, preserved in preserved_by_key.items():
         unique_by_digest: dict[str, str] = {}
         for sidecar_path in dict.fromkeys(preserved):
@@ -365,12 +366,14 @@ def _build_metadata_catalog(
         try:
             value = json.loads((config.library_root / sidecar_path).read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError, UnicodeDecodeError):
-            ambiguous += 1
+            malformed += 1
             continue
         if isinstance(value, dict):
             catalog[key] = MetadataRecord(metadata=value, sidecar_path=sidecar_path)
+        else:
+            malformed += 1
 
-    return catalog, orphan_count, ambiguous
+    return catalog, orphan_count, ambiguous, malformed
 
 
 def _preserve_sidecar(source: Source, name: str, config: LibraryConfig, label: str) -> str:
@@ -490,9 +493,12 @@ def _import_takeout_locked(
 
             metadata_catalog: dict[str, MetadataRecord] = {}
             if config.preserve_sidecars and not dry_run:
-                metadata_catalog, orphan_count, ambiguous_count = _build_metadata_catalog(
-                    prepared, config
-                )
+                (
+                    metadata_catalog,
+                    orphan_count,
+                    ambiguous_count,
+                    malformed_count,
+                ) = _build_metadata_catalog(prepared, config)
                 if orphan_count:
                     summary.warnings.append(
                         f"{orphan_count} sidecar(s) JSON sans média correspondant ont été "
@@ -502,6 +508,11 @@ def _import_takeout_locked(
                     summary.warnings.append(
                         f"{ambiguous_count} association(s) de sidecar restent ambiguës ; "
                         "les JSON concernés ont été conservés."
+                    )
+                if malformed_count:
+                    summary.warnings.append(
+                        f"{malformed_count} sidecar(s) JSON malformé(s) ont été conservés "
+                        "mais ignorés."
                     )
 
             completed_bytes = 0
@@ -711,9 +722,12 @@ def _reconcile_takeout_locked(
             finally:
                 source.close()
 
-        catalog, summary.orphan_sidecars, summary.ambiguous_sidecars = _build_metadata_catalog(
-            prepared, config
-        )
+        (
+            catalog,
+            summary.orphan_sidecars,
+            summary.ambiguous_sidecars,
+            summary.malformed_sidecars,
+        ) = _build_metadata_catalog(prepared, config)
         summary.sidecars_catalogued = len(catalog)
         rows_by_hash = {str(row["sha256"]): dict(row) for row in db.rows()}
         completed = 0
@@ -757,13 +771,17 @@ def _reconcile_takeout_locked(
                                 continue
                             summary.database_matched += 1
                             capture = _capture(record.metadata)
+                            if capture is None:
+                                summary.metadata_without_date += 1
+                            existing_capture = parse_time(row.get("capture_time"))
+                            effective_capture = capture or existing_capture
                             current = config.library_root / str(row["local_path"])
                             target = current
-                            if capture is not None and current.is_file():
+                            if effective_capture is not None and current.is_file():
                                 target = _reconcile_destination(
                                     config.library_root,
                                     Path(name).name,
-                                    capture,
+                                    effective_capture,
                                     digest,
                                     current,
                                 )
@@ -774,6 +792,9 @@ def _reconcile_takeout_locked(
                             elif not current.is_file():
                                 summary.warnings.append(f"Fichier local introuvable : {current}")
                             relative_target = str(target.relative_to(config.library_root))
+                            effective_capture_text = (
+                                effective_capture.isoformat() if effective_capture else None
+                            )
                             connection.execute(
                                 """UPDATE media
                                    SET capture_time=?,
@@ -781,13 +802,13 @@ def _reconcile_takeout_locked(
                                        sidecar_path=?, local_path=?
                                    WHERE id=?""",
                                 (
-                                    capture.isoformat() if capture else None,
+                                    effective_capture_text,
                                     record.sidecar_path,
                                     relative_target,
                                     row["id"],
                                 ),
                             )
-                            row["capture_time"] = capture.isoformat() if capture else None
+                            row["capture_time"] = effective_capture_text
                             row["metadata_provenance"] = "takeout-sidecar"
                             row["sidecar_path"] = record.sidecar_path
                             row["local_path"] = relative_target

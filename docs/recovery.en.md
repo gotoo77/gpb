@@ -29,6 +29,11 @@ copy media content again. Keep the archives until both reconciliation and `verif
 SQLite updates are batched per archive to avoid committing once per media item; on Ctrl+C, moves
 already completed in the current archive are committed before stopping.
 
+Reconciliation follows a no-degradation rule: an absent, malformed, or dateless JSON file never
+replaces an existing SQLite date with an empty value. Malformed JSON files are preserved but
+ignored; orphan sidecars, ambiguous matches, and dateless metadata have separate counters in the
+completion report.
+
 Wait for the prompt to return after `reconcile`, then run `verify` separately. If several commands
 are pasted together, the shell automatically starts the next one after the previous command stops.
 

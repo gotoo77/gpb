@@ -79,6 +79,8 @@ class ReconcileSummary(BaseModel):
     sidecars_catalogued: int = 0
     orphan_sidecars: int = 0
     ambiguous_sidecars: int = 0
+    malformed_sidecars: int = 0
+    metadata_without_date: int = 0
     bytes_read: int = 0
     warnings: list[str] = Field(default_factory=list)
 

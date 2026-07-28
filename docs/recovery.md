@@ -32,6 +32,11 @@ de la réconciliation et de `verify`. Les mises à jour SQLite sont regroupées 
 éviter le coût d’une validation par média ; en cas de `Ctrl+C`, les déplacements déjà effectués
 dans l’archive courante sont validés avant l’arrêt.
 
+La réconciliation suit une règle de non-dégradation : un JSON absent, malformé ou sans date
+exploitable ne remplace jamais une date SQLite existante par une valeur vide. Les JSON malformés
+sont conservés mais ignorés ; les sidecars orphelins, les associations ambiguës et les métadonnées
+sans date disposent de compteurs distincts dans le rapport final.
+
 Attendez le retour au prompt après `reconcile`, puis lancez `verify` séparément. Si plusieurs
 commandes sont collées ensemble, le shell démarre automatiquement la suivante après l’arrêt de la
 précédente.

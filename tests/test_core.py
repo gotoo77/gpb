@@ -668,3 +668,56 @@ def test_reconcile_sigint_commits_paths_of_files_already_moved(
     rows = db.rows()
     assert all((root / str(row["local_path"])).is_file() for row in rows)
     assert sum(row["capture_time"] is not None for row in rows) == 1
+
+
+def test_reconcile_never_erases_an_existing_date_when_sidecar_has_no_date(
+    library: tuple[Path, Database], tmp_path: Path
+) -> None:
+    root, db = library
+    member = "Takeout/Google Photos/Photos/no-date.jpg"
+    media = tmp_path / "media.zip"
+    sidecars = tmp_path / "sidecars.zip"
+    make_zip(media, {member: b"dated-media"})
+    import_takeout([media], load(root), db)
+    row = db.rows()[0]
+    with db.connect() as connection:
+        connection.execute(
+            "UPDATE media SET capture_time=? WHERE id=?",
+            ("2020-05-06T07:08:09+00:00", row["id"]),
+        )
+    make_zip(
+        sidecars,
+        {f"{member}.supplemental-metadata.json": b'{"title":"no-date.jpg"}'},
+    )
+
+    summary = takeout_module.reconcile_takeout([sidecars, media], load(root), db)
+
+    updated = db.rows()[0]
+    assert summary.metadata_without_date == 1
+    assert updated["capture_time"] == "2020-05-06T07:08:09+00:00"
+    assert "media/2020/05/" in updated["local_path"]
+
+
+def test_reconcile_preserves_but_ignores_malformed_json(
+    library: tuple[Path, Database], tmp_path: Path
+) -> None:
+    root, db = library
+    member = "Takeout/Google Photos/Photos/malformed.jpg"
+    media = tmp_path / "media.zip"
+    sidecars = tmp_path / "sidecars.zip"
+    make_zip(media, {member: b"malformed-sidecar-media"})
+    import_takeout([media], load(root), db)
+    original = dict(db.rows()[0])
+    make_zip(
+        sidecars,
+        {f"{member}.supplemental-metadata.json": b'{"broken":'},
+    )
+
+    summary = takeout_module.reconcile_takeout([sidecars, media], load(root), db)
+
+    updated = dict(db.rows()[0])
+    assert summary.malformed_sidecars == 1
+    assert summary.metadata_matched == 0
+    assert updated["capture_time"] == original["capture_time"]
+    assert updated["local_path"] == original["local_path"]
+    assert list((root / "metadata").iterdir())

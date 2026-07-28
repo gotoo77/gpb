@@ -42,11 +42,14 @@ def parse_time(value: object) -> datetime | None:
     if isinstance(value, dict):
         value = value.get("timestamp") or value.get("formatted")
     if isinstance(value, (int, float)) or (isinstance(value, str) and value.isdigit()):
-        return datetime.fromtimestamp(int(value), tz=UTC)
+        try:
+            return datetime.fromtimestamp(int(value), tz=UTC)
+        except (ValueError, OSError, OverflowError):
+            return None
     if isinstance(value, str):
         try:
             return datetime.fromisoformat(value.replace("Z", "+00:00"))
-        except ValueError:
+        except (ValueError, OverflowError):
             return None
     return None
 

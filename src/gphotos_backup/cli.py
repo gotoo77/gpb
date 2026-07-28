@@ -94,6 +94,8 @@ def _emit(value: Any, as_json: bool = False) -> None:
         typer.echo(f"Sidecars catalogués   : {value.sidecars_catalogued:,}")
         typer.echo(f"Sidecars orphelins    : {value.orphan_sidecars:,}")
         typer.echo(f"Associations ambiguës : {value.ambiguous_sidecars:,}")
+        typer.echo(f"Sidecars malformés    : {value.malformed_sidecars:,}")
+        typer.echo(f"Métadonnées sans date : {value.metadata_without_date:,}")
         typer.echo(f"Octets lus            : {value.bytes_read:,}")
         for warning in value.warnings:
             typer.echo(f"WARNING: {warning}", err=True)
