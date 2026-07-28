@@ -37,6 +37,11 @@ exploitable ne remplace jamais une date SQLite existante par une valeur vide. Le
 sont conservés mais ignorés ; les sidecars orphelins, les associations ambiguës et les métadonnées
 sans date disposent de compteurs distincts dans le rapport final.
 
+La progression distingue trois phases : inventaire des volumes, analyse et extraction des
+sidecars, puis réconciliation des médias. Chaque phase affiche son avancement, le volume courant et
+une estimation adaptée. Le compte rendu final est affiché dans le terminal et enregistré sous
+`manifests/reconcile-<date>-<run>.json`.
+
 La progression distingue le catalogue des métadonnées de la lecture des médias. Pendant le
 catalogue, elle affiche `[volume/total]`, le volume courant, le nombre de JSON du volume, le cumul
 et les octets traités. La phase média affiche en plus le fichier courant. Le rapport final détaille

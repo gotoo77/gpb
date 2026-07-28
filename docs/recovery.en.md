@@ -34,6 +34,11 @@ replaces an existing SQLite date with an empty value. Malformed JSON files are p
 ignored; orphan sidecars, ambiguous matches, and dateless metadata have separate counters in the
 completion report.
 
+Progress is split into three phases: volume inventory, sidecar analysis and extraction, then media
+reconciliation. Each phase reports its progress, current volume, and an appropriate estimate. The
+completion report is printed in the terminal and saved as
+`manifests/reconcile-<date>-<run>.json`.
+
 Progress distinguishes metadata cataloging from media reading. During cataloging it displays
 `[volume/total]`, the current volume, JSON count for that volume, cumulative count, and processed
 bytes. The media phase also displays the current file. The completion report details matches,

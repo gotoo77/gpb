@@ -50,6 +50,15 @@ def _root(value: Path | None) -> Path:
     return discover(value)
 
 
+def _human_bytes(value: int | float) -> str:
+    amount = float(value)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if amount < 1000 or unit == "TB":
+            return f"{amount:.1f} {unit}" if unit != "B" else f"{int(amount)} B"
+        amount /= 1000
+    return f"{amount:.1f} TB"
+
+
 def _emit(value: Any, as_json: bool = False) -> None:
     if as_json:
         if hasattr(value, "model_dump"):
@@ -98,6 +107,8 @@ def _emit(value: Any, as_json: bool = False) -> None:
         typer.echo(f"Sidecars malformés    : {value.malformed_sidecars:,}")
         typer.echo(f"Métadonnées sans date : {value.metadata_without_date:,}")
         typer.echo(f"Octets lus            : {value.bytes_read:,}")
+        if value.report_path:
+            typer.echo(f"Rapport JSON           : {value.report_path}")
         for warning in value.warnings:
             typer.echo(f"WARNING: {warning}", err=True)
     elif isinstance(value, dict):
@@ -244,6 +255,7 @@ def takeout_import(
     try:
         config = load(library)
         db = Database(config.library_root)
+        progress_visible = show_progress and not json_output
         progress_ui = Progress(
             SpinnerColumn(),
             TextColumn("{task.description}", markup=False),
@@ -253,7 +265,7 @@ def takeout_import(
             TransferSpeedColumn(),
             TimeRemainingColumn(),
             console=Console(stderr=True),
-            disable=json_output or not show_progress,
+            disable=not progress_visible,
         )
         with progress_ui:
             task = progress_ui.add_task("Analyse des archives…", total=None)
@@ -380,30 +392,70 @@ def takeout_reconcile(
     try:
         config = load(library)
         db = Database(config.library_root)
+        progress_visible = show_progress and not json_output
         progress_ui = Progress(
             SpinnerColumn(),
             TextColumn("{task.description}", markup=False),
             BarColumn(),
             TaskProgressColumn(),
-            DownloadColumn(),
-            TransferSpeedColumn(),
+            TextColumn("{task.fields[amount]}"),
+            TextColumn("{task.fields[rate]}"),
             TimeRemainingColumn(),
             console=Console(stderr=True),
-            disable=json_output or not show_progress,
+            disable=not progress_visible,
         )
         with progress_ui:
-            task = progress_ui.add_task("Catalogue des métadonnées…", total=None)
+            task = progress_ui.add_task(
+                "Démarrage de la réconciliation…",
+                total=None,
+                amount="",
+                rate="",
+            )
+            progress_state = {"key": "", "phase": ""}
 
             def update_progress(completed: int, total: int, label: str) -> None:
+                phase = label.split("·", 1)[0].strip()
+                volumes = phase == "Phase 1/3" or label.startswith("Phase 2/3 · Analyse JSON")
+                key = f"{phase}:{'volumes' if volumes else 'bytes'}"
+                if key != progress_state["key"]:
+                    previous_phase = progress_state["phase"]
+                    if progress_visible and previous_phase and previous_phase != phase:
+                        progress_ui.console.print(f"✓ {previous_phase} terminée")
+                    progress_ui.reset(
+                        task,
+                        completed=0,
+                        total=total,
+                        description=label[-70:],
+                        amount="",
+                        rate="",
+                    )
+                    progress_state["key"] = key
+                    progress_state["phase"] = phase
                 progress_ui.update(
                     task,
                     completed=completed,
                     total=total,
                     description=label[-70:],
                 )
+                speed = progress_ui.tasks[task].speed
+                amount = (
+                    f"{completed}/{total} volumes"
+                    if volumes
+                    else f"{_human_bytes(completed)}/{_human_bytes(total)}"
+                )
+                rate = (
+                    f"{speed:.1f} vol/s"
+                    if volumes and speed is not None
+                    else f"{_human_bytes(speed)}/s"
+                    if speed is not None
+                    else ""
+                )
+                progress_ui.update(task, amount=amount, rate=rate)
 
             summary = reconcile_takeout(paths, config, db, progress=update_progress)
-            progress_ui.update(task, description="Réconciliation terminée")
+            progress_ui.update(task, description="Réconciliation terminée", rate="")
+            if progress_visible:
+                progress_ui.console.print("✓ Phase 3/3 terminée")
     except KeyboardInterrupt:
         typer.echo(
             "\nINTERRUPTION: réconciliation interrompue proprement ; relancez la même commande.",

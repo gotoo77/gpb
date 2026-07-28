@@ -621,7 +621,13 @@ def test_reconcile_links_cross_volume_sidecar_and_moves_existing_media(
             ).encode()
         },
     )
-    summary = takeout_module.reconcile_takeout([sidecars, media], load(root), db)
+    events: list[tuple[int, int, str]] = []
+    summary = takeout_module.reconcile_takeout(
+        [sidecars, media],
+        load(root),
+        db,
+        progress=lambda *event: events.append(event),
+    )
 
     assert summary.metadata_matched == 1
     assert summary.database_matched == 1
@@ -633,6 +639,16 @@ def test_reconcile_links_cross_volume_sidecar_and_moves_existing_media(
     assert corrected_path.read_bytes() == b"reconcile-photo"
     assert "media/2024/01/" in str(corrected_path)
     assert not original_path.exists()
+    assert any("Phase 1/3" in label for _completed, _total, label in events)
+    assert any("Phase 2/3" in label for _completed, _total, label in events)
+    assert any("Phase 3/3" in label for _completed, _total, label in events)
+    assert summary.report_path is not None
+    report = Path(summary.report_path)
+    assert report.is_file()
+    report_payload = json.loads(report.read_text(encoding="utf-8"))
+    assert report_payload["metadata_updated"] == 1
+    assert report_payload["files_moved"] == 1
+    assert report_payload["report_path"] == str(report)
 
 
 def test_reconcile_sigint_commits_paths_of_files_already_moved(
@@ -729,6 +745,44 @@ def test_reconcile_preserves_but_ignores_malformed_json(
     assert updated["capture_time"] == original["capture_time"]
     assert updated["local_path"] == original["local_path"]
     assert list((root / "metadata").iterdir())
+
+
+def test_reconcile_cli_displays_phases_and_persistent_report(
+    library: tuple[Path, Database], tmp_path: Path
+) -> None:
+    root, db = library
+    member = "Takeout/Google Photos/Photos/cli-report.jpg"
+    media = tmp_path / "media.zip"
+    sidecars = tmp_path / "sidecars.zip"
+    make_zip(media, {member: b"cli-report-media"})
+    import_takeout([media], load(root), db)
+    make_zip(
+        sidecars,
+        {
+            f"{member}.supplemental-metadata.json": json.dumps(
+                {"photoTakenTime": {"timestamp": "1704067200"}}
+            ).encode()
+        },
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "takeout",
+            "reconcile",
+            "--library",
+            str(root),
+            str(sidecars),
+            str(media),
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0
+    assert "Phase 1/3" in result.output
+    assert "Phase 2/3" in result.output
+    assert "Phase 3/3" in result.output
+    assert "Rapport JSON" in result.output
 
 
 def test_reconcile_cli_json_contains_complete_report(

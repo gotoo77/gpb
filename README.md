@@ -51,7 +51,8 @@ disque plein, relancez la même commande : les médias déjà terminés ne sont 
 Google peut placer un média et son JSON `supplemental-metadata` dans des volumes différents. `gpb`
 construit donc un catalogue global avant l’import. Pour une bibliothèque créée avec une version
 antérieure, `takeout reconcile` rattache ces JSON, corrige les dates et déplace atomiquement les
-médias concernés sans les recopier.
+médias concernés sans les recopier. La commande affiche séparément les phases d’inventaire, de
+catalogue et de réconciliation, puis conserve son rapport JSON détaillé dans `manifests/`.
 
 ## Sélection explicite avec Picker
 

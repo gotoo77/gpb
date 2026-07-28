@@ -82,6 +82,7 @@ class ReconcileSummary(BaseModel):
     malformed_sidecars: int = 0
     metadata_without_date: int = 0
     bytes_read: int = 0
+    report_path: str | None = None
     warnings: list[str] = Field(default_factory=list)
 
 

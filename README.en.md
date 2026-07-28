@@ -49,7 +49,8 @@ command: already completed media are not copied again.
 Google may place a media item and its `supplemental-metadata` JSON in different volumes. `gpb`
 therefore builds a global catalog before importing. For a library created with an earlier version,
 `takeout reconcile` links those JSON files, corrects dates, and atomically moves affected media
-without copying them again.
+without copying them again. The command reports inventory, cataloging, and reconciliation as
+separate phases, then saves its detailed JSON report under `manifests/`.
 
 ## Explicit Picker selection
 

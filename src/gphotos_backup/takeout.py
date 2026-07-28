@@ -13,7 +13,7 @@ import zlib
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from glob import glob, has_magic
 from pathlib import Path
 from typing import IO, Any
@@ -318,6 +318,7 @@ def _build_metadata_catalog(
     config: LibraryConfig,
     *,
     progress: ProgressCallback | None = None,
+    inventory_progress: bool = False,
 ) -> tuple[dict[str, MetadataRecord], int, int, int]:
     media_names = {
         name for _index, _path, names in prepared for name in names if not _is_sidecar(name)
@@ -335,14 +336,21 @@ def _build_metadata_catalog(
                 references[(input_path, name)] = key
 
     sidecar_total_bytes = 0
-    for _index, input_path, names in prepared:
+    for archive_index, input_path, names in prepared:
         source = open_source(input_path)
         try:
             sidecar_total_bytes += sum(source.size(name) for name in names if _is_sidecar(name))
         finally:
             source.close()
+        if progress and inventory_progress:
+            progress(
+                archive_index,
+                len(prepared),
+                f"Phase 2/3 · Analyse JSON [{archive_index}/{len(prepared)}] "
+                f"{input_path.name[-24:]}",
+            )
     if progress and sidecar_total_bytes:
-        progress(0, sidecar_total_bytes, "Inventaire des métadonnées terminé")
+        progress(0, sidecar_total_bytes, "Phase 2/3 · Extraction des métadonnées")
 
     preserved_by_key: dict[str, list[str]] = {}
     sidecar_completed_bytes = 0
@@ -370,7 +378,7 @@ def _build_metadata_catalog(
                 progress(
                     sidecar_completed_bytes,
                     sidecar_total_bytes,
-                    f"Métadonnées [{archive_index}/{len(prepared)}] "
+                    f"Phase 2/3 · Métadonnées [{archive_index}/{len(prepared)}] "
                     f"{input_path.name[-24:]} · {archive_sidecars} JSON "
                     f"({sidecars_processed} au total)",
                 )
@@ -747,18 +755,30 @@ def _reconcile_takeout_locked(
                 total_bytes += sum(source.size(name) for name in names if not _is_sidecar(name))
             finally:
                 source.close()
+            if progress:
+                progress(
+                    archive_index,
+                    len(expanded),
+                    f"Phase 1/3 · Inventaire [{archive_index}/{len(expanded)}] "
+                    f"{input_path.name[-24:]}",
+                )
 
         (
             catalog,
             summary.orphan_sidecars,
             summary.ambiguous_sidecars,
             summary.malformed_sidecars,
-        ) = _build_metadata_catalog(prepared, config, progress=progress)
+        ) = _build_metadata_catalog(
+            prepared,
+            config,
+            progress=progress,
+            inventory_progress=True,
+        )
         summary.sidecars_catalogued = len(catalog)
         rows_by_hash = {str(row["sha256"]): dict(row) for row in db.rows()}
         completed = 0
         if progress:
-            progress(0, total_bytes, "Catalogue global des métadonnées construit")
+            progress(0, total_bytes, "Phase 3/3 · Réconciliation des médias")
 
         for archive_index, input_path, names in prepared:
             source = open_source(input_path)
@@ -772,7 +792,7 @@ def _reconcile_takeout_locked(
                             member_size = source.size(name)
                             record = catalog.get(str(safe_archive_name(name)))
                             label = (
-                                f"[{archive_index}/{len(expanded)}] "
+                                f"Phase 3/3 · [{archive_index}/{len(expanded)}] "
                                 f"{input_path.name[-24:]} · {Path(name).name[-32:]}"
                             )
                             if record is None:
@@ -846,12 +866,39 @@ def _reconcile_takeout_locked(
                         raise
             finally:
                 source.close()
+        try:
+            _write_reconcile_report(config.library_root, run_id, summary)
+        except OSError as error:
+            summary.report_path = None
+            summary.warnings.append(
+                f"Impossible d'enregistrer le rapport de réconciliation : {error}"
+            )
         db.finish_run(run_id, summary.model_dump(), "success")
     except BaseException as error:
         result = "interrupted" if isinstance(error, KeyboardInterrupt) else "failed"
         db.finish_run(run_id, summary.model_dump(), result, [str(error)])
         raise
     return summary
+
+
+def _write_reconcile_report(root: Path, run_id: str, summary: ReconcileSummary) -> None:
+    target = root / "manifests" / f"reconcile-{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{run_id[:8]}.json"
+    temporary = target.with_suffix(".json.partial")
+    summary.report_path = str(target)
+    try:
+        temporary.write_text(
+            json.dumps(
+                summary.model_dump(mode="json"),
+                indent=2,
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _reconcile_destination(
