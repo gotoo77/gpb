@@ -477,6 +477,15 @@ def takeout_reconcile(
     _emit(summary, json_output)
 
 
+@takeout_app.command("verify")
+def takeout_verify(
+    library: Annotated[Path | None, typer.Option("--library")] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Alias pratique de `gpb verify` après un traitement Takeout."""
+    verify(library=library, json_output=json_output)
+
+
 def _emit_check_summary(summary: TakeoutCheckSummary) -> None:
     typer.echo(f"Archives contrôlées : {summary.archives_checked:,}")
     typer.echo(f"Archives valides    : {summary.valid:,}")

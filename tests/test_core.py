@@ -785,6 +785,27 @@ def test_reconcile_cli_displays_phases_and_persistent_report(
     assert "Rapport JSON" in result.output
 
 
+def test_takeout_verify_is_an_alias_for_top_level_verify(
+    library: tuple[Path, Database], tmp_path: Path
+) -> None:
+    root, db = library
+    archive = tmp_path / "verify-alias.zip"
+    make_zip(archive, {"photo.jpg": b"verified"})
+    import_takeout([archive], load(root), db)
+
+    result = CliRunner().invoke(
+        app,
+        ["takeout", "verify", "--library", str(root), "--json"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["scanned"] == 1
+    assert payload["already_local"] == 1
+    assert payload["failed"] == 0
+
+
 def test_reconcile_cli_json_contains_complete_report(
     library: tuple[Path, Database], tmp_path: Path
 ) -> None:
