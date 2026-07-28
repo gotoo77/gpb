@@ -66,8 +66,8 @@ CREATE TABLE IF NOT EXISTS picker_sessions (
 
 
 class Database:
-    def __init__(self, root: Path) -> None:
-        self.path = root / ".gphotos-backup" / "state.sqlite3"
+    def __init__(self, root: Path, path: Path | None = None) -> None:
+        self.path = path or root / ".gphotos-backup" / "state.sqlite3"
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:

@@ -79,12 +79,12 @@ corruption ni doublon.
 
 ## P4 — Exploitation et restauration
 
-Statut : **envisagé**
+Statut : **en cours**
 
-- [ ] Ajouter `gpb report` avec volumes, années, formats, doublons et anomalies.
-- [ ] Ajouter une vérification incrémentale et une vérification complète planifiable.
+- [x] Ajouter `gpb report` avec volumes, années, formats, doublons et anomalies.
+- [x] Ajouter une vérification incrémentale ; la planification reste à fournir.
 - [ ] Exporter une bibliothèque vers un autre disque en conservant le manifeste.
-- [ ] Restaurer ou reconstruire la base SQLite depuis un manifeste et les médias.
+- [x] Restaurer ou reconstruire la base SQLite depuis un manifeste et les médias.
 - [ ] Comparer deux bibliothèques locales sans supprimer automatiquement les différences.
 - [ ] Fournir des unités systemd utilisateur pour les tâches périodiques.
 - [ ] Stocker les jetons OAuth dans le keyring système avec fallback documenté.

@@ -55,6 +55,21 @@ Back up the entire library, including `.gphotos-backup/state.sqlite3`. Run `gpb 
 filesystem restoration. `gpb scan` can index untracked files in `media/` without moving them.
 Manifests use JSON Lines and intentionally omit temporary remote URLs.
 
+## Rebuilding SQLite
+
+If `state.sqlite3` is lost or damaged, use the latest JSON Lines manifest:
+
+```console
+uv run gpb rebuild --manifest manifests/manifest-YYYYMMDDTHHMMSSZ.jsonl --replace
+uv run gpb verify
+```
+
+Without `--replace`, the command refuses to touch an existing database. With it, the command first
+creates a timestamped `state.sqlite3.backup-*`. It validates the manifest and every media item in
+a temporary database; an invalid line, unsafe path, missing file, or size mismatch cancels the
+entire operation. After replacement, every verification status is reset to `pending`: `verify`
+must recalculate SHA-256 hashes before the library is considered verified again.
+
 ## Corrupt Takeout archive
 
 Before importing, check all volumes with one command:

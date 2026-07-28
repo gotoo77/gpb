@@ -27,6 +27,7 @@ from . import __version__
 from . import auth as oauth
 from .config import discover, load, write_config
 from .db import Database
+from .maintenance import library_report, rebuild_database
 from .models import ReconcileSummary, Summary, TakeoutCheckSummary
 from .takeout import (
     CorruptArchiveError,
@@ -875,6 +876,138 @@ def export_manifest(
         progress_ui.update(task, description="Manifeste exporté")
     temporary.replace(target)
     typer.echo(str(target))
+
+
+@app.command()
+def rebuild(
+    manifest: Annotated[Path, typer.Option("--manifest", help="Manifeste JSON Lines à restaurer.")],
+    library: Annotated[Path | None, typer.Option("--library")] = None,
+    replace: Annotated[
+        bool,
+        typer.Option(
+            "--replace",
+            help="Sauvegarder puis remplacer la base SQLite existante.",
+        ),
+    ] = False,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+    show_progress: Annotated[
+        bool, typer.Option("--progress/--no-progress", help="Afficher la progression.")
+    ] = True,
+) -> None:
+    """Reconstruire SQLite depuis un manifeste et les médias locaux."""
+    root = _root(library)
+    progress_ui = Progress(
+        SpinnerColumn(),
+        TextColumn("{task.description}", markup=False),
+        BarColumn(),
+        TaskProgressColumn(),
+        TextColumn("{task.completed:.0f}/{task.total:.0f} médias"),
+        TimeRemainingColumn(),
+        console=Console(stderr=True),
+        disable=json_output or not show_progress,
+    )
+    try:
+        with progress_ui:
+            task = progress_ui.add_task("Validation du manifeste…", total=None)
+
+            def update(current: int, total: int, path: str) -> None:
+                progress_ui.update(
+                    task,
+                    completed=current,
+                    total=total,
+                    description=_progress_label(f"[{current}/{total}] {path}"),
+                )
+
+            result = rebuild_database(
+                root,
+                manifest,
+                replace=replace,
+                progress=update,
+            )
+            progress_ui.update(task, description="Base reconstruite")
+    except (OSError, ValueError, sqlite3.Error) as error:
+        if json_output:
+            _emit({"status": "error", "error": str(error)}, True)
+        else:
+            typer.echo(f"ERROR: reconstruction annulée : {error}", err=True)
+            typer.echo("La base existante n'a pas été modifiée.", err=True)
+        raise typer.Exit(2) from None
+    _emit(result, json_output)
+    if not json_output:
+        typer.echo("Lancez maintenant `gpb verify` pour recalculer les empreintes.")
+
+
+def _emit_library_report(report: dict[str, Any]) -> None:
+    typer.echo(f"Bibliothèque : {report['library']}")
+    typer.echo(f"Médias       : {int(report['media']):,}")
+    typer.echo(f"Volume       : {_human_bytes(int(report['bytes']))}")
+    typer.echo(f"Vérifiés     : {int(report['verified']):,}")
+    typer.echo("\nPar année :")
+    for year, values in dict(report["years"]).items():
+        row = dict(values)
+        typer.echo(f"- {year}: {int(row['media']):,} · {_human_bytes(int(row['bytes']))}")
+    typer.echo("\nPar format :")
+    for extension, values in dict(report["formats"]).items():
+        row = dict(values)
+        typer.echo(f"- {extension}: {int(row['media']):,} · {_human_bytes(int(row['bytes']))}")
+    duplicates = dict(report["duplicates"])
+    typer.echo("\nDoublons de contenu :")
+    typer.echo(f"- groupes : {int(duplicates['groups']):,}")
+    typer.echo(f"- médias concernés : {int(duplicates['media']):,}")
+    typer.echo(f"- volume redondant : {_human_bytes(int(duplicates['reclaimable_bytes']))}")
+    typer.echo("\nAnomalies :")
+    anomalies = dict(report["anomalies"])
+    if not anomalies:
+        typer.echo("- aucune")
+    else:
+        labels = {
+            "missing": "médias absents",
+            "size_mismatch": "tailles incohérentes",
+            "pending_verification": "vérifications en attente",
+            "integrity_failure": "échecs d'intégrité",
+            "without_date": "médias sans date",
+        }
+        for name, count in anomalies.items():
+            typer.echo(f"- {labels.get(name, name)}: {int(count):,}")
+
+
+@app.command()
+def report(
+    library: Annotated[Path | None, typer.Option("--library")] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+    show_progress: Annotated[
+        bool, typer.Option("--progress/--no-progress", help="Afficher la progression.")
+    ] = True,
+) -> None:
+    """Résumer volumes, années, formats, doublons et anomalies."""
+    root = _root(library)
+    rows = Database(root).rows()
+    progress_ui = Progress(
+        SpinnerColumn(),
+        TextColumn("{task.description}", markup=False),
+        BarColumn(),
+        TaskProgressColumn(),
+        TextColumn("{task.completed:.0f}/{task.total:.0f} médias"),
+        TimeRemainingColumn(),
+        console=Console(stderr=True),
+        disable=json_output or not show_progress,
+    )
+    with progress_ui:
+        task = progress_ui.add_task("Analyse de la bibliothèque…", total=len(rows))
+
+        def update(current: int, total: int, path: str) -> None:
+            progress_ui.update(
+                task,
+                completed=current,
+                description=_progress_label(f"[{current}/{total}] {path}"),
+            )
+
+        result = library_report(root, rows, progress=update)
+        progress_ui.update(task, description="Rapport terminé")
+    if json_output:
+        _emit(result, True)
+    else:
+        _emit_library_report(result)
 
 
 @app.command()

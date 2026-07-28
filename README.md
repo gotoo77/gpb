@@ -25,6 +25,7 @@ uv run gpb takeout check ~/Téléchargements/takeout-*.zip
 uv run gpb takeout import ~/Downloads/takeout-1.zip ~/Downloads/takeout-2.zip
 uv run gpb takeout reconcile ~/Téléchargements/takeout-*.zip
 uv run gpb verify
+uv run gpb report
 uv run gpb status
 uv run gpb export-manifest
 ```
@@ -34,6 +35,10 @@ Après une commande Takeout, `uv run gpb takeout verify` est également disponib
 temps restant ; `--no-progress` désactive cette barre. Une relance réutilise les résultats des
 fichiers dont la taille et la date de modification n'ont pas changé. `uv run gpb verify --force`
 impose une relecture intégrale.
+
+`gpb report` résume la photothèque par année et format, mesure les volumes, détecte les doublons
+exacts par SHA-256 et signale les médias absents, de taille incohérente, non vérifiés ou sans date.
+`--json` fournit le même rapport pour un script.
 
 La commande `takeout check` décompresse et contrôle le CRC de chaque entrée, poursuit le contrôle
 si un volume est défectueux, puis liste précisément les archives à retélécharger. Chaque résultat
@@ -57,8 +62,9 @@ disque plein, relancez la même commande : les médias déjà terminés ne sont 
 ## Progression des commandes
 
 Toutes les opérations potentiellement longues affichent leur progression : imports et contrôles
-Takeout, réconciliation, vérification d’intégrité, téléchargement Picker, analyse locale et export
-du manifeste. Les attentes réseau plus courtes affichent un indicateur d’activité. L’option
+Takeout, réconciliation, vérification d’intégrité, rapport, reconstruction, téléchargement Picker,
+analyse locale et export du manifeste. Les attentes réseau plus courtes affichent un indicateur
+d’activité. L’option
 `--no-progress` désactive les barres lorsqu’elle est disponible ; `--json` supprime automatiquement
 toute animation pour garantir une sortie machine propre.
 

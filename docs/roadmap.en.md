@@ -78,12 +78,12 @@ duplication.
 
 ## P4 — Operations and restoration
 
-Status: **considered**
+Status: **in progress**
 
-- [ ] Add `gpb report` with volumes, years, formats, duplicates, and anomalies.
-- [ ] Add incremental and schedulable full verification.
+- [x] Add `gpb report` with volumes, years, formats, duplicates, and anomalies.
+- [x] Add incremental verification; scheduling remains to be provided.
 - [ ] Export a library to another disk while preserving its manifest.
-- [ ] Restore or rebuild SQLite from a manifest and media files.
+- [x] Restore or rebuild SQLite from a manifest and media files.
 - [ ] Compare two local libraries without automatically deleting differences.
 - [ ] Provide user systemd units for periodic tasks.
 - [ ] Store OAuth tokens in the system keyring with a documented fallback.

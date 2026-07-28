@@ -61,6 +61,22 @@ après une restauration du système de fichiers. `gpb scan` peut indexer les fic
 `media/` sans les déplacer. Les manifests utilisent JSON Lines et omettent volontairement les URL
 distantes temporaires.
 
+## Reconstruire une base SQLite
+
+Si `state.sqlite3` est perdu ou endommagé, utilisez le dernier manifeste JSON Lines :
+
+```console
+uv run gpb rebuild --manifest manifests/manifest-YYYYMMDDTHHMMSSZ.jsonl --replace
+uv run gpb verify
+```
+
+Sans `--replace`, la commande refuse de toucher à une base existante. Avec cette option, elle crée
+d’abord une sauvegarde horodatée `state.sqlite3.backup-*`. Le manifeste et chaque média sont
+validés dans une base temporaire ; une ligne invalide, un chemin dangereux, un fichier absent ou
+une taille différente annule entièrement l’opération. Après remplacement, tous les statuts sont
+remis à `pending` : `verify` doit recalculer les SHA-256 avant que la bibliothèque soit de nouveau
+considérée comme vérifiée.
+
 ## Archive Takeout corrompue
 
 Avant l’import, contrôlez tous les volumes en une seule commande :

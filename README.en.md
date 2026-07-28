@@ -24,6 +24,7 @@ uv run gpb takeout check ~/Downloads/takeout-*.zip
 uv run gpb takeout import ~/Downloads/takeout-1.zip ~/Downloads/takeout-2.zip
 uv run gpb takeout reconcile ~/Downloads/takeout-*.zip
 uv run gpb verify
+uv run gpb report
 uv run gpb status
 uv run gpb export-manifest
 ```
@@ -32,6 +33,10 @@ After a Takeout command, `uv run gpb takeout verify` is also available as an ali
 `uv run gpb verify`. Verification reports the current file, processed bytes, throughput, and
 remaining time; `--no-progress` disables this bar. A subsequent run reuses results for files whose
 size and modification time have not changed. `uv run gpb verify --force` forces a complete reread.
+
+`gpb report` summarizes the library by year and format, measures volumes, detects exact SHA-256
+duplicates, and reports missing, size-mismatched, unverified, or undated media. `--json` provides
+the same report for scripts.
 
 The `takeout check` command decompresses every member and checks its CRC, continues when a volume is
 damaged, then lists the exact archives that need to be downloaded again. Each result is saved
@@ -54,7 +59,8 @@ command: already completed media are not copied again.
 ## Command progress
 
 Every potentially long operation reports progress: Takeout imports and checks, reconciliation,
-integrity verification, Picker downloads, local scans, and manifest exports. Shorter network waits
+integrity verification, reports, database rebuilds, Picker downloads, local scans, and manifest
+exports. Shorter network waits
 display an activity indicator. `--no-progress` disables bars where available; `--json`
 automatically suppresses every animation to guarantee clean machine-readable output.
 

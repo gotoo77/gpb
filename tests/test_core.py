@@ -891,6 +891,117 @@ def test_scan_and_manifest_export_support_progress_options(
     assert len(manifest.read_text(encoding="utf-8").splitlines()) == 1
 
 
+def test_rebuild_restores_manifest_atomically_and_requires_replace(
+    library: tuple[Path, Database], tmp_path: Path
+) -> None:
+    root, db = library
+    archive = tmp_path / "rebuild.zip"
+    make_zip(archive, {"photo.jpg": b"rebuild"})
+    import_takeout([archive], load(root), db)
+    manifest = tmp_path / "manifest.jsonl"
+    row = dict(db.rows()[0])
+    row.pop("remote_url", None)
+    manifest.write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    refused = CliRunner().invoke(
+        app,
+        ["rebuild", "--library", str(root), "--manifest", str(manifest), "--json"],
+        catch_exceptions=False,
+    )
+    restored = CliRunner().invoke(
+        app,
+        [
+            "rebuild",
+            "--library",
+            str(root),
+            "--manifest",
+            str(manifest),
+            "--replace",
+            "--json",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert refused.exit_code == 2
+    assert restored.exit_code == 0
+    payload = json.loads(restored.output)
+    assert payload["media_restored"] == 1
+    assert Path(payload["backup"]).is_file()
+    restored_row = Database(root).rows()[0]
+    assert restored_row["sha256"] == row["sha256"]
+    assert restored_row["verification_status"] == "pending"
+
+
+def test_rebuild_invalid_manifest_preserves_existing_database(
+    library: tuple[Path, Database], tmp_path: Path
+) -> None:
+    root, db = library
+    archive = tmp_path / "preserve.zip"
+    make_zip(archive, {"photo.jpg": b"preserve"})
+    import_takeout([archive], load(root), db)
+    invalid = tmp_path / "invalid.jsonl"
+    invalid.write_text('{"local_path":"../escape.jpg"}\n', encoding="utf-8")
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "rebuild",
+            "--library",
+            str(root),
+            "--manifest",
+            str(invalid),
+            "--replace",
+            "--json",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 2
+    assert Database(root).counts()["total"] == 1
+
+
+def test_report_summarizes_years_formats_duplicates_and_anomalies(
+    library: tuple[Path, Database],
+) -> None:
+    root, db = library
+    first = root / "media/2024/01/first.jpg"
+    second = root / "media/2024/01/second.jpg"
+    first.parent.mkdir(parents=True, exist_ok=True)
+    first.write_bytes(b"same")
+    second.write_bytes(b"same")
+    digest, size = sha256_file(first)
+    for path in (first, second):
+        db.add_media(
+            {
+                "source": "local",
+                "original_name": path.name,
+                "local_path": str(path.relative_to(root)),
+                "size": size,
+                "sha256": digest,
+                "capture_time": "2024-01-02T03:04:05+00:00",
+                "verification_status": "verified",
+            }
+        )
+
+    result = CliRunner().invoke(
+        app,
+        ["report", "--library", str(root), "--json"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["media"] == 2
+    assert payload["years"]["2024"]["media"] == 2
+    assert payload["formats"][".jpg"]["media"] == 2
+    assert payload["duplicates"] == {
+        "groups": 1,
+        "media": 2,
+        "reclaimable_bytes": size,
+    }
+    assert payload["anomalies"] == {}
+
+
 def test_cli_help_explains_every_command_group() -> None:
     root_help = CliRunner().invoke(app, ["--help"], catch_exceptions=False)
     assert root_help.exit_code == 0
@@ -901,6 +1012,8 @@ def test_cli_help_explains_every_command_group() -> None:
         "Afficher l'état de la bibliothèque",
         "Exporter l'inventaire SQLite",
         "Diagnostiquer la configuration",
+        "Reconstruire SQLite",
+        "Résumer volumes",
         "Configurer et contrôler",
         "Télécharger une sélection explicite",
         "Contrôler, importer et réconcilier",
