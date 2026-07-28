@@ -60,6 +60,14 @@ def _human_bytes(value: int | float) -> str:
     return f"{amount:.1f} TB"
 
 
+def _progress_label(value: str, limit: int = 70) -> str:
+    """Raccourcir un libellé sans masquer son index ni la fin du nom de fichier."""
+    if len(value) <= limit:
+        return value
+    head_length = min(30, (limit - 1) // 2)
+    return f"{value[:head_length]}…{value[-(limit - head_length - 1) :]}"
+
+
 def _emit(value: Any, as_json: bool = False) -> None:
     if as_json:
         if hasattr(value, "model_dump"):
@@ -294,14 +302,14 @@ def picker_download(
                     task,
                     completed=0,
                     total=total,
-                    description=label[-70:],
+                    description=_progress_label(label),
                 )
                 current_item = item_index
             progress_ui.update(
                 task,
                 completed=completed,
                 total=total,
-                description=f"{label[-55:]} · média {item_index}/{item_count}",
+                description=_progress_label(f"{label} · média {item_index}/{item_count}"),
             )
 
         summary = download_session(
@@ -350,7 +358,7 @@ def takeout_import(
                     task,
                     completed=completed,
                     total=total,
-                    description=label[-70:],
+                    description=_progress_label(label),
                 )
 
             summary = import_takeout(
@@ -428,7 +436,7 @@ def takeout_check(
                     task,
                     completed=completed,
                     total=total,
-                    description=label[-70:],
+                    description=_progress_label(label),
                 )
 
             summary = check_takeout(paths, progress=update_progress, force=force)
@@ -500,7 +508,7 @@ def takeout_reconcile(
                         task,
                         completed=0,
                         total=total,
-                        description=label[-70:],
+                        description=_progress_label(label),
                         amount="",
                         rate="",
                     )
@@ -510,7 +518,7 @@ def takeout_reconcile(
                     task,
                     completed=completed,
                     total=total,
-                    description=label[-70:],
+                    description=_progress_label(label),
                 )
                 speed = progress_ui.tasks[task].speed
                 amount = (
@@ -629,7 +637,7 @@ def scan(
                 progress_ui.update(
                     task,
                     completed=completed_bytes,
-                    description=current_label[-70:],
+                    description=_progress_label(current_label),
                 )
 
             if relative in indexed:
@@ -697,7 +705,7 @@ def verify(
                     progress_ui.update(
                         task,
                         completed=completed_bytes,
-                        description=current_label[-70:],
+                        description=_progress_label(current_label),
                     )
 
                 if not path.is_file():
@@ -708,7 +716,7 @@ def verify(
                     progress_ui.update(
                         task,
                         completed=completed_bytes,
-                        description=label[-70:],
+                        description=_progress_label(label),
                     )
                 else:
                     digest, size = sha256_file(path, on_block=advance)

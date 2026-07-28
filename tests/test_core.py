@@ -12,7 +12,7 @@ import pytest
 from typer.testing import CliRunner
 
 import gphotos_backup.takeout as takeout_module
-from gphotos_backup.cli import app
+from gphotos_backup.cli import _progress_label, app
 from gphotos_backup.config import load, write_config
 from gphotos_backup.db import Database
 from gphotos_backup.takeout import ZipSource, check_takeout, import_takeout
@@ -883,6 +883,16 @@ def test_cli_help_explains_every_command_group() -> None:
         result = CliRunner().invoke(app, [group, "--help"], catch_exceptions=False)
         assert result.exit_code == 0
         assert all(description in result.output for description in descriptions)
+
+
+def test_progress_label_preserves_index_and_filename() -> None:
+    label = "[3/24070] media/2025/09/" + ("répertoire-très-long/" * 4) + "photo.jpg"
+    compacted = _progress_label(label)
+
+    assert len(compacted) == 70
+    assert compacted.startswith("[3/24070]")
+    assert compacted.endswith("photo.jpg")
+    assert "…" in compacted
 
 
 def test_reconcile_cli_json_contains_complete_report(
