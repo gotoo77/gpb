@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 import unicodedata
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
@@ -28,13 +29,18 @@ def sanitize(name: str, limit: int = 180) -> str:
     return f"{Path(value).stem[:stem_limit]}{suffix}"[:limit]
 
 
-def sha256_file(path: Path) -> tuple[str, int]:
+def sha256_file(
+    path: Path,
+    on_block: Callable[[int], None] | None = None,
+) -> tuple[str, int]:
     digest = hashlib.sha256()
     size = 0
     with path.open("rb") as stream:
         while block := stream.read(CHUNK):
             digest.update(block)
             size += len(block)
+            if on_block:
+                on_block(len(block))
     return digest.hexdigest(), size
 
 

@@ -30,7 +30,8 @@ uv run gpb export-manifest
 ```
 
 Après une commande Takeout, `uv run gpb takeout verify` est également disponible comme alias de
-`uv run gpb verify`.
+`uv run gpb verify`. La vérification affiche le fichier courant, les octets traités, le débit et le
+temps restant ; `--no-progress` désactive cette barre.
 
 La commande `takeout check` décompresse et contrôle le CRC de chaque entrée, poursuit le contrôle
 si un volume est défectueux, puis liste précisément les archives à retélécharger. Chaque résultat

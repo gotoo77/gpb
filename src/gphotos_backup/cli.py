@@ -481,9 +481,12 @@ def takeout_reconcile(
 def takeout_verify(
     library: Annotated[Path | None, typer.Option("--library")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
+    show_progress: Annotated[
+        bool, typer.Option("--progress/--no-progress", help="Afficher la progression en octets.")
+    ] = True,
 ) -> None:
     """Alias pratique de `gpb verify` après un traitement Takeout."""
-    verify(library=library, json_output=json_output)
+    verify(library=library, json_output=json_output, show_progress=show_progress)
 
 
 def _emit_check_summary(summary: TakeoutCheckSummary) -> None:
@@ -547,32 +550,69 @@ def scan(
 def verify(
     library: Annotated[Path | None, typer.Option("--library")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
+    show_progress: Annotated[
+        bool, typer.Option("--progress/--no-progress", help="Afficher la progression en octets.")
+    ] = True,
 ) -> None:
     root = _root(library)
     db = Database(root)
     summary = Summary()
-    with db.connect() as connection:
-        for row in db.rows():
-            summary.scanned += 1
-            path = root / str(row["local_path"])
-            if not path.is_file():
-                summary.failed += 1
-                summary.warnings.append(f"Missing: {row['local_path']}")
-                status = "missing"
-            else:
-                digest, size = sha256_file(path)
-                status = (
-                    "verified" if digest == row["sha256"] and size == row["size"] else "corrupt"
-                )
-                if status == "verified":
-                    summary.already_local += 1
-                else:
+    rows = db.rows()
+    total_bytes = sum(int(row["size"]) for row in rows)
+    completed_bytes = 0
+    progress_ui = Progress(
+        SpinnerColumn(),
+        TextColumn("{task.description}", markup=False),
+        BarColumn(),
+        TaskProgressColumn(),
+        DownloadColumn(),
+        TransferSpeedColumn(),
+        TimeRemainingColumn(),
+        console=Console(stderr=True),
+        disable=json_output or not show_progress,
+    )
+    with progress_ui:
+        task = progress_ui.add_task("Préparation de la vérification…", total=total_bytes)
+        with db.connect() as connection:
+            for index, row in enumerate(rows, start=1):
+                summary.scanned += 1
+                path = root / str(row["local_path"])
+                label = f"[{index}/{len(rows)}] {row['local_path']}"
+
+                def advance(block_size: int, current_label: str = label) -> None:
+                    nonlocal completed_bytes
+                    completed_bytes += block_size
+                    progress_ui.update(
+                        task,
+                        completed=completed_bytes,
+                        description=current_label[-70:],
+                    )
+
+                if not path.is_file():
                     summary.failed += 1
-                    summary.warnings.append(f"Integrity mismatch: {row['local_path']}")
-            connection.execute(
-                "UPDATE media SET verification_status=?, error=? WHERE id=?",
-                (status, None if status == "verified" else status, row["id"]),
-            )
+                    summary.warnings.append(f"Missing: {row['local_path']}")
+                    status = "missing"
+                    completed_bytes += int(row["size"])
+                    progress_ui.update(
+                        task,
+                        completed=completed_bytes,
+                        description=label[-70:],
+                    )
+                else:
+                    digest, size = sha256_file(path, on_block=advance)
+                    status = (
+                        "verified" if digest == row["sha256"] and size == row["size"] else "corrupt"
+                    )
+                    if status == "verified":
+                        summary.already_local += 1
+                    else:
+                        summary.failed += 1
+                        summary.warnings.append(f"Integrity mismatch: {row['local_path']}")
+                connection.execute(
+                    "UPDATE media SET verification_status=?, error=? WHERE id=?",
+                    (status, None if status == "verified" else status, row["id"]),
+                )
+        progress_ui.update(task, description="Vérification terminée")
     _emit(summary, json_output)
     if summary.failed:
         raise typer.Exit(1)

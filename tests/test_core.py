@@ -16,7 +16,7 @@ from gphotos_backup.cli import app
 from gphotos_backup.config import load, write_config
 from gphotos_backup.db import Database
 from gphotos_backup.takeout import ZipSource, check_takeout, import_takeout
-from gphotos_backup.util import safe_archive_name, sanitize
+from gphotos_backup.util import safe_archive_name, sanitize, sha256_file
 
 
 @pytest.fixture
@@ -804,6 +804,17 @@ def test_takeout_verify_is_an_alias_for_top_level_verify(
     assert payload["scanned"] == 1
     assert payload["already_local"] == 1
     assert payload["failed"] == 0
+
+
+def test_sha256_file_reports_byte_progress(tmp_path: Path) -> None:
+    path = tmp_path / "progress.bin"
+    path.write_bytes(b"x" * (2 * 1024 * 1024 + 17))
+    blocks: list[int] = []
+
+    _digest, size = sha256_file(path, on_block=blocks.append)
+
+    assert size == sum(blocks) == path.stat().st_size
+    assert len(blocks) == 3
 
 
 def test_reconcile_cli_json_contains_complete_report(
